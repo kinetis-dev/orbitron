@@ -1,0 +1,9 @@
+/vendor/
+.kinetis-cache/
+composer.phar
+/.env
+.phpunit.cache/
+.phpunit.result.cache
+.phpstan-cache/
+psalm.sarif
+.DS_Store

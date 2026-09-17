@@ -1,0 +1,59 @@
+{
+    "name": "kinetis/orbitron",
+    "description": "A development-only application construction harness for Kinetis: a CLI and a standalone MCP server that hand any coding agent a portable Kinetis context document, the installed kinetis/* package inventory, a deterministic verification of the project's Composer layout, and one previewable health-endpoint scaffold, with no model of its own.",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Alon Noy"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "kinetis/framework": "dev-main",
+        "kinetis/mcp-protocol": "dev-main",
+        "composer-runtime-api": "^2.0"
+    },
+    "require-dev": {
+        "infection/infection": "^0.35.0",
+        "phpstan/phpstan": "^2.2.8",
+        "phpunit/phpunit": "^13.3.3",
+        "vimeo/psalm": "^6.17"
+    },
+    "autoload": {
+        "psr-4": {
+            "Kinetis\\Orbitron\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Kinetis\\Orbitron\\Tests\\": "tests/"
+        }
+    },
+    "bin": [
+        "bin/kinetis-orbitron-mcp"
+    ],
+    "extra": {
+        "kinetis": {
+            "scan": "Kinetis\\Orbitron\\Console\\"
+        }
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../framework"
+        },
+        {
+            "type": "path",
+            "url": "../mcp-protocol"
+        }
+    ],
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "infection/extension-installer": true
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

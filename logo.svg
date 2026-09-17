@@ -1,0 +1,155 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 420" width="100%" height="100%">
+  <defs>
+    <style>
+      @font-face {
+        font-family: 'Orbitron';
+        font-weight: 900;
+        font-style: normal;
+        src: url(data:font/woff2;base64,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) format('woff2');
+      }
+
+      .k-letter {
+        font-family: 'Orbitron', sans-serif;
+        font-weight: 900;
+        fill: none;
+        stroke: #DC2626;
+        text-anchor: middle;
+        dominant-baseline: central;
+      }
+      .brand-title {
+        font-family: 'Orbitron', sans-serif;
+        font-weight: 900;
+        fill: #F59E0B;
+        text-anchor: middle;
+        letter-spacing: 0.1em;
+      }
+      .brand-sub {
+        font-family: 'Orbitron', sans-serif;
+        font-weight: 900;
+        fill: #D97706;
+        text-anchor: middle;
+        letter-spacing: 0.4em;
+      }
+    </style>
+
+    <filter id="k-edge-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="1.4" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="text-glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="4" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="tail-glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+    <filter id="ball-glow" x="-200%" y="-200%" width="500%" height="500%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <linearGradient id="tail-fade" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#D97706" stop-opacity="1" />
+      <stop offset="35%" stop-color="#B45309" stop-opacity="0.85" />
+      <stop offset="75%" stop-color="#92400E" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#78350F" stop-opacity="0.15" />
+    </linearGradient>
+    <linearGradient id="tail-fade-2" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DB7C0C" stop-opacity="0.9" />
+      <stop offset="35%" stop-color="#B85A0F" stop-opacity="0.765" />
+      <stop offset="75%" stop-color="#984814" stop-opacity="0.36" />
+      <stop offset="100%" stop-color="#803E15" stop-opacity="0.135" />
+    </linearGradient>
+    <linearGradient id="tail-fade-3" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DD8013" stop-opacity="0.8" />
+      <stop offset="35%" stop-color="#BD6116" stop-opacity="0.68" />
+      <stop offset="75%" stop-color="#9F501A" stop-opacity="0.32" />
+      <stop offset="100%" stop-color="#88471B" stop-opacity="0.12" />
+    </linearGradient>
+    <linearGradient id="tail-fade-4" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#DF851A" stop-opacity="0.7" />
+      <stop offset="35%" stop-color="#C1681C" stop-opacity="0.595" />
+      <stop offset="75%" stop-color="#A65920" stop-opacity="0.28" />
+      <stop offset="100%" stop-color="#905021" stop-opacity="0.105" />
+    </linearGradient>
+    <linearGradient id="tail-fade-5" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E18A20" stop-opacity="0.6" />
+      <stop offset="35%" stop-color="#C66F22" stop-opacity="0.51" />
+      <stop offset="75%" stop-color="#AC6126" stop-opacity="0.24" />
+      <stop offset="100%" stop-color="#985827" stop-opacity="0.09" />
+    </linearGradient>
+    <linearGradient id="tail-fade-6" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E38F26" stop-opacity="0.5" />
+      <stop offset="35%" stop-color="#CA7629" stop-opacity="0.425" />
+      <stop offset="75%" stop-color="#B2692C" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#A1612D" stop-opacity="0.075" />
+    </linearGradient>
+    <linearGradient id="tail-fade-7" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E5942D" stop-opacity="0.4" />
+      <stop offset="35%" stop-color="#CE7D2F" stop-opacity="0.34" />
+      <stop offset="75%" stop-color="#B97132" stop-opacity="0.16" />
+      <stop offset="100%" stop-color="#A96A33" stop-opacity="0.06" />
+    </linearGradient>
+    <linearGradient id="tail-fade-8" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E79834" stop-opacity="0.3" />
+      <stop offset="35%" stop-color="#D38435" stop-opacity="0.255" />
+      <stop offset="75%" stop-color="#C07938" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#B17339" stop-opacity="0.045" />
+    </linearGradient>
+    <linearGradient id="tail-fade-9" x1="88.98" y1="-20.87" x2="101.79" y2="-51.23" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EA9D3A" stop-opacity="0.2" />
+      <stop offset="35%" stop-color="#D78B3C" stop-opacity="0.17" />
+      <stop offset="75%" stop-color="#C6823E" stop-opacity="0.08" />
+      <stop offset="100%" stop-color="#B97C3E" stop-opacity="0.03" />
+    </linearGradient>
+
+    <radialGradient id="ball-core" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#92400E" />
+      <stop offset="55%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#FFE9B0" />
+    </radialGradient>
+  </defs>
+
+  <!-- MARK -->
+  <g transform="translate(200, 190)">
+    <!-- K monogram, hollow/outline text, crisp with a minimal edge-only glow -->
+    <text class="k-letter" x="0" y="6" font-size="150" stroke-width="6" filter="url(#k-edge-glow)">K</text>
+
+    <!-- comet tail: all sections now in front of the K, ordered thickest (back of this group) to thinnest (front) -->
+    <path d="M 88.98 -20.87 A 120 48 -35 0 1 52.04 20.17" fill="none" stroke="url(#tail-fade-9)" stroke-width="19" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M 88.98 -20.87 A 120 48 -35 0 1 -2.41 57.72" fill="none" stroke="url(#tail-fade-8)" stroke-width="15" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M 88.98 -20.87 A 120 48 -35 0 1 -63.34 78.80" fill="none" stroke="url(#tail-fade-7)" stroke-width="11.5" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M 88.98 -20.87 A 120 48 -35 0 1 -100.64 64.34" fill="none" stroke="url(#tail-fade-6)" stroke-width="8.5" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M 88.98 -20.87 A 120 48 -35 1 1 -87.17 18.19" fill="none" stroke="url(#tail-fade-5)" stroke-width="6" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M 88.98 -20.87 A 120 48 -35 1 1 -65.13 -7.92" fill="none" stroke="url(#tail-fade-4)" stroke-width="4.2" stroke-linecap="round" filter="url(#tail-glow)" />
+
+    <path d="M 88.98 -20.87 A 120 48 -35 1 1 -65.13 -7.92" fill="none" stroke="url(#tail-fade-3)" stroke-width="2.8" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M -15.35 -47.41 A 120 48 -35 0 1 43.71 -74.83" fill="none" stroke="url(#tail-fade-3)" stroke-width="2.8" stroke-linecap="round" filter="url(#tail-glow)" />
+
+    <path d="M 88.98 -20.87 A 120 48 -35 1 1 -65.13 -7.92" fill="none" stroke="url(#tail-fade-2)" stroke-width="1.7" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M -15.35 -47.41 A 120 48 -35 0 1 43.71 -74.83" fill="none" stroke="url(#tail-fade-2)" stroke-width="1.7" stroke-linecap="round" filter="url(#tail-glow)" />
+
+    <path d="M 88.98 -20.87 A 120 48 -35 1 1 -65.13 -7.92" fill="none" stroke="url(#tail-fade)" stroke-width="1.0" stroke-linecap="round" filter="url(#tail-glow)" />
+    <path d="M -15.35 -47.41 A 120 48 -35 0 1 43.71 -74.83" fill="none" stroke="url(#tail-fade)" stroke-width="1.0" stroke-linecap="round" filter="url(#tail-glow)" />
+
+    <!-- comet head: dark core, glowing bright rim -->
+    <circle cx="88.98" cy="-20.87" r="12" fill="url(#ball-core)" filter="url(#ball-glow)" />
+  </g>
+
+  <!-- WORDMARK -->
+  <text class="brand-title" x="200" y="350" font-size="66">KINETIS</text>
+  <text class="brand-sub" x="200" y="385" font-size="24">FRAMEWORK</text>
+</svg>

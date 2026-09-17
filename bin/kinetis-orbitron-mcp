@@ -1,0 +1,45 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Kinetis\McpProtocol\McpServer;
+use Kinetis\McpProtocol\StdioLoop;
+use Kinetis\Orbitron\Mcp\OrbitronMcpApplication;
+use Kinetis\Runtime\ProjectRoot;
+
+// Composer's generated vendor/bin/kinetis-orbitron-mcp proxy sets this
+// global before including this script, and that proxy is the entry point
+// in any project that installed the package. The bare path below resolves
+// only inside this repository, where the server is developed.
+$autoloadPath = $GLOBALS['_composer_autoload_path'] ?? dirname(__DIR__) . '/vendor/autoload.php';
+unset($GLOBALS['_composer_autoload_path']);
+
+if (!is_file($autoloadPath)) {
+    fwrite(STDERR, "Cannot locate the Composer autoloader. Run vendor/bin/kinetis-orbitron-mcp instead — "
+        . "this script is not meant to be invoked directly.\n");
+
+    exit(1);
+}
+
+require $autoloadPath;
+
+// The consumer root comes from Composer's own bin proxy, which sets
+// `_composer_bin_dir` to <app>/vendor/bin before including this file. No
+// MCP message can name a project root. Read before the proxy globals are
+// discarded, and falling back — inside this repository only — to the
+// package's own root, one directory above bin/.
+$projectRoot = ProjectRoot::detect(__DIR__);
+
+// Nothing but JSON-RPC frames may reach stdout, so a failure that ends the
+// loop is reported on stderr. The application is never booted: no route,
+// listener or package bootstrap runs.
+try {
+    $application = new OrbitronMcpApplication($projectRoot);
+
+    new StdioLoop()->run(new McpServer($application->serverInfo(), $application), STDIN, STDOUT);
+} catch (Throwable $e) {
+    fwrite(STDERR, OrbitronMcpApplication::SERVER_NAME . ': ' . $e->getMessage() . "\n");
+
+    exit(1);
+}

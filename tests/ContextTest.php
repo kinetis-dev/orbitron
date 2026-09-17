@@ -1,0 +1,192 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Kinetis\Orbitron\Tests;
+
+use Kinetis\Orbitron\Context;
+use Kinetis\Orbitron\InstalledPackages;
+use Kinetis\Orbitron\PackageFact;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * What the context document says, and that both renderings say it.
+ */
+final class ContextTest extends TestCase
+{
+    private static function context(): Context
+    {
+        return new Context(new InstalledPackages([
+            new PackageFact('kinetis/queue', '1.3.2', '/app/vendor/kinetis/queue'),
+            new PackageFact('kinetis/orbitron', '1.0.0', '/app/vendor/kinetis/orbitron'),
+            new PackageFact('kinetis/framework', '1.11.2', '/app/vendor/kinetis/framework'),
+            new PackageFact('kinetis/replaced-by-framework', null, null),
+            new PackageFact('psr/log', '3.0.2', '/app/vendor/psr/log'),
+        ]));
+    }
+
+    public function test_it_reports_the_detected_orbitron_version_and_the_sorted_package_facts(): void
+    {
+        $document = self::context()->toArray();
+
+        self::assertSame('1.0.0', $document['orbitronVersion']);
+        self::assertSame(
+            [
+                ['name' => 'kinetis/framework', 'version' => '1.11.2'],
+                ['name' => 'kinetis/orbitron', 'version' => '1.0.0'],
+                ['name' => 'kinetis/queue', 'version' => '1.3.2'],
+            ],
+            $document['packages'],
+        );
+    }
+
+    public function test_it_names_orbitron_as_a_development_harness_and_states_its_limits(): void
+    {
+        $document = self::context()->toArray();
+
+        self::assertSame('Orbitron', $document['harness']['name']);
+        self::assertStringContainsString('development-only', $document['harness']['role']);
+        self::assertStringContainsString('coding agent', $document['harness']['role']);
+
+        $limits = implode("\n", $document['harness']['limits']);
+
+        self::assertStringContainsString('no model', $limits);
+        self::assertStringContainsString('require-dev', $limits);
+        self::assertStringContainsString('not evidence', $limits);
+        // Precise rather than absolute: reading that metadata goes
+        // through Composer's own installed.php, verification and
+        // scaffolding read the project's own composer.json, and STDOUT
+        // makes "writes nothing" false too.
+        self::assertStringContainsString("Composer's installed-package metadata", $limits);
+        self::assertStringContainsString('`composer.json` through a bounded read', $limits);
+        self::assertStringContainsString('no configuration and no credentials', $limits);
+        self::assertStringNotContainsString('reads no project file', $limits);
+        // The write boundary is the two fixed files and the flag that
+        // asks for them, named rather than waved at.
+        self::assertStringContainsString(
+            'The two files an applied scaffold creates are everything it writes',
+            $limits,
+        );
+        self::assertStringContainsString('src/Http/HealthController.php', $limits);
+        self::assertStringContainsString('tests/Http/HealthControllerTest.php', $limits);
+        self::assertStringContainsString('it creates no directory', $limits);
+        // What the scaffold cannot establish, stated where an agent
+        // reads it rather than left to be discovered.
+        self::assertStringContainsString(
+            'it cannot tell you in advance whether the project already routes `GET /health`',
+            $limits,
+        );
+        // Verification is bounded in what it claims, not only in what it
+        // reads — including the claim a narrower check invites, that a
+        // rejected layout is a broken application.
+        self::assertStringContainsString('not route uniqueness', $limits);
+        self::assertStringContainsString(
+            'not that route, command or listener discovery is broken',
+            $limits,
+        );
+    }
+
+    public function test_it_links_to_the_authoritative_kinetis_guides(): void
+    {
+        $urls = array_column(self::context()->toArray()['guides'], 'url', 'title');
+
+        self::assertSame('https://kinetis.dev/docs/agent-workflow.html', $urls['Agent Workflow']);
+        self::assertSame('https://kinetis.dev/docs/application-recipes.html', $urls['Application Recipes']);
+        self::assertSame('https://kinetis.dev/docs/agent-correctness.html', $urls['Agent Correctness Review']);
+        self::assertSame('https://kinetis.dev/docs/orbitron.html', $urls['Orbitron']);
+    }
+
+    public function test_the_workflow_is_the_orbitron_commands_and_then_the_guides(): void
+    {
+        $workflow = implode("\n", self::context()->toArray()['workflow']);
+
+        self::assertStringContainsString('orbitron:context', $workflow);
+        self::assertStringContainsString('orbitron:inspect', $workflow);
+        self::assertStringContainsString('orbitron:verify', $workflow);
+        self::assertStringContainsString('orbitron:scaffold', $workflow);
+        self::assertStringContainsString('Agent Workflow', $workflow);
+        self::assertStringContainsString('Agent Correctness Review', $workflow);
+    }
+
+    public function test_each_command_entry_states_what_it_may_change(): void
+    {
+        $commands = self::context()->toArray()['commands'];
+
+        self::assertSame(
+            ['orbitron:context', 'orbitron:inspect', 'orbitron:verify', 'orbitron:scaffold'],
+            array_column($commands, 'name'),
+        );
+        self::assertSame(
+            [['markdown', 'json'], ['json'], ['json'], ['json']],
+            array_column($commands, 'formats'),
+        );
+
+        foreach ($commands as $command) {
+            self::assertStringContainsString('STDOUT', $command['effect']);
+            self::assertStringContainsString('changes', $command['effect']);
+        }
+    }
+
+    /**
+     * Orbitron changes nothing, and the document says so without
+     * claiming the invocation as a whole is free of side effects.
+     */
+    public function test_it_states_the_launcher_side_effects_orbitron_does_not_prevent(): void
+    {
+        $launcher = self::context()->toArray()['launcher'];
+
+        self::assertStringContainsString('.env', $launcher);
+        self::assertStringContainsString('.kinetis-cache/compiled.php', $launcher);
+        self::assertStringContainsString('bootstrap: false', $launcher);
+        self::assertStringContainsString('not side-effect-free', $launcher);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function factProvider(): iterable
+    {
+        yield 'orbitron version' => ['1.0.0'];
+        yield 'framework fact' => ['kinetis/framework'];
+        yield 'framework version' => ['1.11.2'];
+        yield 'queue fact' => ['kinetis/queue'];
+        yield 'agent workflow link' => ['https://kinetis.dev/docs/agent-workflow.html'];
+        yield 'launcher cache claim' => ['.kinetis-cache/compiled.php'];
+        yield 'scaffold command' => ['orbitron:scaffold'];
+        yield 'scaffold controller target' => ['src/Http/HealthController.php'];
+    }
+
+    /**
+     * Markdown renders the array the JSON format encodes, so a fact
+     * present in one is present in the other.
+     */
+    #[DataProvider('factProvider')]
+    public function test_markdown_carries_the_same_facts_as_the_document_array(string $needle): void
+    {
+        $context = self::context();
+
+        self::assertStringContainsString($needle, $context->toMarkdown());
+        self::assertStringContainsString(
+            $needle,
+            json_encode($context->toArray(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+        );
+    }
+
+    public function test_markdown_excludes_what_the_document_array_excludes(): void
+    {
+        $markdown = self::context()->toMarkdown();
+
+        self::assertStringNotContainsString('psr/log', $markdown);
+        self::assertStringNotContainsString('kinetis/replaced-by-framework', $markdown);
+        self::assertStringNotContainsString('/app/vendor', $markdown);
+    }
+
+    public function test_markdown_is_one_document_ending_in_a_single_newline(): void
+    {
+        $markdown = self::context()->toMarkdown();
+
+        self::assertStringStartsWith('# Orbitron 1.0.0', $markdown);
+        self::assertStringEndsWith("- `kinetis/queue` 1.3.2\n", $markdown);
+    }
+}
