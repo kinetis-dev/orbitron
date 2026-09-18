@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Kinetis\Orbitron\Mcp;
 
+use Kinetis\McpDocs\DocsApplication;
 use Kinetis\McpProtocol\Exception\JsonRpcException;
 use Kinetis\McpProtocol\McpApplication;
 use Kinetis\McpProtocol\ProgressEmitter;
@@ -19,21 +20,31 @@ use Kinetis\Orbitron\ScaffoldMode;
 use stdClass;
 
 /**
- * Orbitron's four documents as MCP tools and its context document as one
- * MCP resource, over the shared protocol server.
+ * Orbitron's four documents as MCP tools, and its context document plus
+ * the Kinetis documentation as MCP resources, over the shared protocol
+ * server. One connection is the whole project-local surface an agent
+ * needs: there is no second server to register.
  *
- * Every call reaches {@see Documents}, the same service the CLI commands
- * adapt: no command is invoked, no output is parsed, and no envelope is
- * built twice. The project root is detected once at construction and is
- * the only thing this object holds — no MCP message can name a path, a
- * source body, a URL, a template or a command, and none of the tools
- * takes an argument at all.
+ * Every tool call reaches {@see Documents}, the same service the CLI
+ * commands adapt: no command is invoked, no output is parsed, and no
+ * envelope is built twice. Every `kinetis://docs/*` read reaches the
+ * {@see DocsApplication} this object was handed, which owns the fixed
+ * catalogue and the bounded fetch. kinetis/mcp-docs remains the
+ * framework-agnostic owner of both and is installable on its own; none
+ * of it is copied here.
+ *
+ * The project root and that documentation application are the only
+ * things this object holds. No MCP message can name a path, a source
+ * body, a URL, an origin, a ref, a template or a command: a tool takes
+ * no argument at all, and a resource read selects one entry of a fixed
+ * catalogue whose URLs are the documentation server's own constants.
  *
  * `orbitron_scaffold_apply` is the one tool that writes. Selecting it is
  * the whole mutation request, which is why it has no boolean to set: the
  * MCP client's configured approval policy controls whether it runs, and
  * the local process and filesystem permissions remain the authority
- * boundary.
+ * boundary for it. Reading a documentation page is the one operation
+ * that leaves this machine, over HTTPS to that fixed origin.
  *
  * Orbitron does not boot the Kinetis application here, so nothing about
  * running this server registers a route, a listener or a bootstrap.
@@ -44,18 +55,30 @@ final readonly class OrbitronMcpApplication implements McpApplication
 
     public const string CONTEXT_URI = 'kinetis://orbitron/context';
 
-    private const string INSTRUCTIONS = 'Orbitron reports what this project has and can scaffold one fixed '
-        . 'health endpoint. Read ' . self::CONTEXT_URI . ' first: it states the harness boundary and the '
-        . 'workflow. Then call orbitron_inspect for the installed kinetis/* versions, orbitron_verify for '
-        . 'whether the project layout is the one Orbitron supports, and orbitron_scaffold_plan before '
-        . 'orbitron_scaffold_apply, which is the only tool that writes. Installed versions are read once at '
-        . 'startup, so restart this server after changing dependencies.';
+    private const string DOCS_ENTRY_URI = 'kinetis://docs/agent-workflow';
+
+    private const string INSTRUCTIONS = 'Orbitron reports what this project has, serves the Kinetis documentation, '
+        . 'and can scaffold one fixed health endpoint. Read ' . self::CONTEXT_URI . ' first: it states the harness '
+        . 'boundary and the workflow. Then call orbitron_inspect for the installed kinetis/* versions, '
+        . 'orbitron_verify for whether the project layout is the one Orbitron supports, and orbitron_scaffold_plan '
+        . 'before orbitron_scaffold_apply, which is the only tool that writes. Before changing application code, '
+        . 'read ' . self::DOCS_ENTRY_URI . ' and route the task through the pages it names — read them instead of '
+        . 'answering about Kinetis from memory. Those pages are published from main and can describe behavior newer '
+        . 'than this project has installed, so the versions orbitron_inspect reports and the installed source stay '
+        . 'the authority for anything version-sensitive. Installed versions are read once at startup, so restart '
+        . 'this server after changing dependencies.';
 
     /** The input schema all four tools share: an object with no members and nothing else admitted. */
     private const string CLOSED_SCHEMA_DESCRIPTION = 'Takes no arguments.';
 
+    /**
+     * @param DocsApplication $docs the documentation server this one
+     *        publishes and delegates to, constructed with the diagnostic
+     *        stream a failed fetch is reported on — never stdout.
+     */
     public function __construct(
         private string $projectRoot,
+        private DocsApplication $docs,
         private Documents $documents = new Documents(),
     ) {}
 
@@ -110,18 +133,26 @@ final readonly class OrbitronMcpApplication implements McpApplication
     }
 
     /**
+     * Orbitron's context, then every documentation page, as the one list
+     * a client reads. The documentation entries are the catalogue's own —
+     * listed here rather than restated, so a page added to
+     * kinetis/mcp-docs appears without a change in this package.
+     *
      * @return list<ResourceDescription>
      */
     #[\Override]
     public function resources(): array
     {
-        return [new ResourceDescription(
-            self::CONTEXT_URI,
-            'Orbitron context',
-            'What Orbitron is, what it does not establish, where the authoritative Kinetis guidance lives, '
-            . 'the command workflow, and the installed kinetis/* package facts, as Markdown.',
-            'text/markdown',
-        )];
+        return [
+            new ResourceDescription(
+                self::CONTEXT_URI,
+                'Orbitron context',
+                'What Orbitron is, what it does not establish, where the authoritative Kinetis guidance lives, '
+                . 'the command workflow, and the installed kinetis/* package facts, as Markdown.',
+                'text/markdown',
+            ),
+            ...$this->docs->resources(),
+        ];
     }
 
     #[\Override]
@@ -147,14 +178,19 @@ final readonly class OrbitronMcpApplication implements McpApplication
         });
     }
 
+    /**
+     * The context document is read locally; every other URI is the
+     * documentation server's to answer, including the refusal for one it
+     * does not carry.
+     */
     #[\Override]
     public function readResource(string $uri, ?object $context): ResourceResult
     {
-        if ($uri !== self::CONTEXT_URI) {
-            throw JsonRpcException::resourceNotFound($uri);
+        if ($uri === self::CONTEXT_URI) {
+            return new ResourceResult($uri, 'text/markdown', $this->documents->context());
         }
 
-        return new ResourceResult($uri, 'text/markdown', $this->documents->context());
+        return $this->docs->readResource($uri, $context);
     }
 
     /**
@@ -185,9 +221,10 @@ final readonly class OrbitronMcpApplication implements McpApplication
     }
 
     /**
-     * Closed-world because the whole read set is this project's own
+     * Closed-world because a tool's whole read set is this project's own
      * Composer metadata and manifest: no network, no database, no other
-     * system to reach.
+     * system to reach. Reading a documentation resource is the one
+     * operation that leaves this machine, and it is not a tool.
      */
     private static function readOnly(): ToolAnnotations
     {

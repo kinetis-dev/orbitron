@@ -52,6 +52,8 @@ final readonly class Documents
      *     guides: list<array{title: string, url: string}>,
      *     workflow: list<string>,
      *     commands: list<array{name: string, formats: list<string>, effect: string}>,
+     *     mcp: array{binary: string, protocolVersion: string, tools: list<array{name: string, effect: string}>, resources: list<array{uri: string, effect: string}>},
+     *     server: string,
      *     launcher: string,
      *     packages: list<array{name: string, version: string}>,
      * }

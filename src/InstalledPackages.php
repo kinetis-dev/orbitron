@@ -27,6 +27,9 @@ final readonly class InstalledPackages
     /** @var array<string, string> package name => pretty version, ordered by name */
     private array $versions;
 
+    /** @var array<string, true> the names above Composer reports as the root project */
+    private array $roots;
+
     /**
      * @param list<PackageFact>|null $facts the records to read, or null to
      *        read Composer's own installed set — the production path.
@@ -34,6 +37,7 @@ final readonly class InstalledPackages
     public function __construct(?array $facts = null)
     {
         $versions = [];
+        $roots = [];
 
         foreach ($facts ?? self::readComposer() as $fact) {
             // A name that is only replaced or provided carries neither a
@@ -48,17 +52,28 @@ final readonly class InstalledPackages
             }
 
             $versions[$fact->name] ??= $fact->version;
+
+            if ($fact->root) {
+                $roots[$fact->name] = true;
+            }
         }
 
         ksort($versions, SORT_STRING);
 
         $this->versions = $versions;
+        $this->roots = $roots;
     }
 
     /**
      * The installed packages as the `{name, version}` records the
-     * context and inventory documents carry, in name order. Install paths are read as a
-     * retention test above and never leave this object.
+     * context and inventory documents carry, in name order.
+     *
+     * The Composer root project is left out: it is the project being
+     * developed, not something this project installed, so reporting it
+     * as a dependency at a version would be untrue. It is still retained
+     * above, because {@see orbitronVersion()} needs it when Orbitron
+     * itself is the root. Install paths are read as a retention test in
+     * the constructor and never leave this object.
      *
      * @return list<array{name: string, version: string}>
      */
@@ -67,6 +82,10 @@ final readonly class InstalledPackages
         $records = [];
 
         foreach ($this->versions as $name => $version) {
+            if (isset($this->roots[$name])) {
+                continue;
+            }
+
             $records[] = ['name' => $name, 'version' => $version];
         }
 
@@ -76,7 +95,9 @@ final readonly class InstalledPackages
     /**
      * Orbitron's own version, which is the single authority every
      * document reports — the detected package fact, never a constant
-     * maintained beside it.
+     * maintained beside it. It answers from the retained set, so a
+     * checkout of this package developing itself still names its
+     * version.
      *
      * @throws RuntimeException when the records carry no entry for this
      *         package, the one state in which Orbitron cannot name its
@@ -90,10 +111,15 @@ final readonly class InstalledPackages
     }
 
     /**
+     * Composer lists the root project among the installed packages and
+     * names it in one other place; both are read here so the records
+     * downstream can tell the two apart.
+     *
      * @return list<PackageFact>
      */
     private static function readComposer(): array
     {
+        $root = InstalledVersions::getRootPackage()['name'];
         $facts = [];
 
         foreach (InstalledVersions::getInstalledPackages() as $name) {
@@ -101,6 +127,7 @@ final readonly class InstalledPackages
                 $name,
                 InstalledVersions::getPrettyVersion($name),
                 InstalledVersions::getInstallPath($name),
+                $name === $root,
             );
         }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Kinetis\Orbitron\Tests;
 
 use JsonException;
+use Kinetis\McpDocs\DocsCatalogue;
 use Kinetis\Orbitron\HealthScaffold;
 use Kinetis\Orbitron\Mcp\OrbitronMcpApplication;
 use PHPUnit\Framework\TestCase;
@@ -81,10 +82,14 @@ final class OrbitronMcpBinaryTest extends TestCase
             ['orbitron_inspect', 'orbitron_verify', 'orbitron_scaffold_plan', 'orbitron_scaffold_apply'],
             array_column($frames[1]['result']['tools'], 'name'),
         );
-        self::assertSame(
-            [OrbitronMcpApplication::CONTEXT_URI],
-            array_column($frames[2]['result']['resources'], 'uri'),
-        );
+
+        $resources = [OrbitronMcpApplication::CONTEXT_URI];
+
+        foreach (DocsCatalogue::pages() as $page) {
+            $resources[] = $page->uri();
+        }
+
+        self::assertSame($resources, array_column($frames[2]['result']['resources'], 'uri'));
         self::assertStringContainsString('# Orbitron', $frames[3]['result']['contents'][0]['text']);
 
         self::assertSame('ready', $this->document($frames[4])['status']);
@@ -103,6 +108,22 @@ final class OrbitronMcpBinaryTest extends TestCase
             'namespace ' . rtrim($this->project->production, '\\') . '\\Http;',
             $this->project->contents(HealthScaffold::TARGETS[0]),
         );
+    }
+
+    /**
+     * Stdout carries JSON-RPC frames, so it is handed to the loop and to
+     * nothing else, and the composed documentation server is given stderr
+     * to report a failed page fetch on. Read off the binary: producing a
+     * real one would mean reaching the network from the suite, and its
+     * own contents are asserted against a controlled client in
+     * {@see OrbitronMcpApplicationTest}.
+     */
+    public function test_the_binary_gives_the_documentation_server_stderr_and_stdout_only_to_the_loop(): void
+    {
+        $source = (string) file_get_contents(self::BINARY);
+
+        self::assertStringContainsString('new DocsApplication(diagnostics: STDERR)', $source);
+        self::assertSame(1, preg_match_all('/\bSTDOUT\b/', $source));
     }
 
     /**

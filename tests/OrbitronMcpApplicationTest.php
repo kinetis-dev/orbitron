@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Kinetis\Orbitron\Tests;
 
 use JsonException;
+use Kinetis\McpDocs\DocsApplication;
+use Kinetis\McpDocs\DocsCatalogue;
+use Kinetis\McpDocs\DocsFetcher;
 use Kinetis\McpProtocol\McpServer;
 use Kinetis\McpProtocol\StdioLoop;
 use Kinetis\Orbitron\Documents;
@@ -13,6 +16,8 @@ use Kinetis\Orbitron\InstalledPackages;
 use Kinetis\Orbitron\Mcp\OrbitronMcpApplication;
 use Kinetis\Orbitron\PackageFact;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\Response\MockResponse;
 
 /**
  * Orbitron over MCP, driven through the shared stdio loop so what is
@@ -22,10 +27,26 @@ use PHPUnit\Framework\TestCase;
  * here is that MCP reaches the same ones without running a command, that
  * the mutating tool is labelled and behaves as labelled, and that no
  * message can widen what the server touches.
+ *
+ * The documentation half runs against kinetis/mcp-docs' real
+ * DocsApplication and DocsCatalogue over a Symfony MockHttpClient, so the
+ * catalogue, the source URL and the failure vocabulary asserted here are
+ * that package's own rather than a copy. What its fetcher does with a
+ * response is proved in its own suite; what belongs here is that Orbitron
+ * publishes and delegates to it without changing any of it.
  */
 final class OrbitronMcpApplicationTest extends TestCase
 {
     private ScaffoldProject $project;
+
+    /** @var list<MockResponse> what the composed documentation server's client answers with, in order */
+    private array $responses = [];
+
+    /** @var list<array{string, string}> the method and URL of every request it made */
+    private array $requests = [];
+
+    /** @var resource the stream the composed server reports a failed fetch on — the binary's stderr */
+    private $diagnostics;
 
     /**
      * @throws JsonException
@@ -33,11 +54,18 @@ final class OrbitronMcpApplicationTest extends TestCase
     protected function setUp(): void
     {
         $this->project = new ScaffoldProject();
+        $this->responses = [];
+        $this->requests = [];
+
+        $diagnostics = fopen('php://memory', 'r+');
+        self::assertIsResource($diagnostics);
+        $this->diagnostics = $diagnostics;
     }
 
     protected function tearDown(): void
     {
         $this->project->remove();
+        fclose($this->diagnostics);
     }
 
     public function test_initialize_names_orbitron_and_advertises_both_features(): void
@@ -112,12 +140,12 @@ final class OrbitronMcpApplicationTest extends TestCase
     {
         $list = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"resources/list"}'])[0]['result']['resources'];
 
-        self::assertSame([[
+        self::assertSame([
             'uri' => OrbitronMcpApplication::CONTEXT_URI,
             'name' => 'Orbitron context',
             'description' => $list[0]['description'],
             'mimeType' => 'text/markdown',
-        ]], $list);
+        ], $list[0]);
 
         $contents = $this->frames([
             '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"'
@@ -136,6 +164,95 @@ final class OrbitronMcpApplicationTest extends TestCase
         ])[0]['error'];
 
         self::assertSame(-32002, $error['code']);
+    }
+
+    /**
+     * One connection carries both halves: Orbitron's own context, then
+     * kinetis/mcp-docs' catalogue whole and in its own order. A client
+     * registers no second server to reach the documentation.
+     */
+    public function test_the_resource_list_is_the_context_followed_by_the_whole_documentation_catalogue(): void
+    {
+        $resources = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"resources/list"}'])[0]['result']['resources'];
+
+        $expected = [OrbitronMcpApplication::CONTEXT_URI];
+
+        foreach (DocsCatalogue::pages() as $page) {
+            $expected[] = $page->uri();
+        }
+
+        self::assertSame($expected, array_column($resources, 'uri'));
+        self::assertContains('kinetis://docs/agent-workflow', array_column($resources, 'uri'));
+        self::assertSame(
+            [DocsCatalogue::MIME_TYPE],
+            array_values(array_unique(array_column(array_slice($resources, 1), 'mimeType'))),
+        );
+    }
+
+    /**
+     * The entry point the server instructions name, read end to end: the
+     * page comes back under its own URI, and the one request made is a
+     * GET of the URL the catalogue derives — no origin, ref or path from
+     * the message.
+     */
+    public function test_a_documentation_read_is_delegated_and_returns_the_fetched_page(): void
+    {
+        $page = "# Agent Workflow\n\nRoute the task through the matching recipe.\n";
+        $this->responses = [new MockResponse($page)];
+
+        $contents = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"kinetis://docs/agent-workflow"}}',
+        ])[0]['result']['contents'];
+
+        self::assertSame('kinetis://docs/agent-workflow', $contents[0]['uri']);
+        self::assertSame(DocsCatalogue::MIME_TYPE, $contents[0]['mimeType']);
+        self::assertSame($page, $contents[0]['text']);
+        self::assertSame(
+            [['GET', DocsCatalogue::SOURCE_BASE_URL . 'agent-workflow.md']],
+            $this->requests,
+        );
+    }
+
+    /**
+     * A URI under the documentation prefix that the catalogue does not
+     * carry is refused in the same vocabulary an unknown Orbitron URI
+     * gets, and nothing is fetched for it.
+     */
+    public function test_an_unknown_documentation_uri_is_refused_without_a_fetch(): void
+    {
+        $error = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"kinetis://docs/not-a-page"}}',
+        ])[0]['error'];
+
+        self::assertSame(-32002, $error['code']);
+        self::assertSame([], $this->requests);
+    }
+
+    /**
+     * A failed fetch keeps its detail on the server's own diagnostic
+     * stream — the one the binary points at stderr — and answers the
+     * client with a generic error naming only the URI it asked for. The
+     * source URL and the status never reach the frame.
+     */
+    public function test_a_failed_documentation_fetch_is_generic_on_the_wire_and_detailed_on_the_stream(): void
+    {
+        $this->responses = [new MockResponse('', ['http_code' => 503])];
+
+        $frame = $this->rawFrames([
+            '{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"kinetis://docs/index"}}',
+        ])[0];
+
+        $error = json_decode($frame, associative: true, flags: JSON_THROW_ON_ERROR)['error'];
+
+        self::assertSame(-32603, $error['code']);
+        self::assertSame('Could not read "kinetis://docs/index".', $error['message']);
+        self::assertStringNotContainsString(DocsCatalogue::SOURCE_BASE_URL, $frame);
+        self::assertStringNotContainsString('expected status 200', $frame);
+
+        $diagnostic = $this->diagnostic();
+
+        self::assertStringContainsString(DocsCatalogue::SOURCE_BASE_URL . 'index.md', $diagnostic);
+        self::assertStringContainsString('expected status 200, got 503', $diagnostic);
     }
 
     public function test_inspect_and_verify_return_the_documents_the_commands_write(): void
@@ -294,6 +411,33 @@ final class OrbitronMcpApplicationTest extends TestCase
         );
     }
 
+    /**
+     * kinetis/mcp-docs' real application, over a client that answers from
+     * {@see $responses} and records what it was asked for. Only the
+     * transport is a stand-in: the catalogue, the URL, the bounds and the
+     * failure vocabulary are that package's own.
+     */
+    private function docs(): DocsApplication
+    {
+        $responses = $this->responses;
+
+        $client = new MockHttpClient(function (string $method, string $url) use (&$responses): MockResponse {
+            $this->requests[] = [$method, $url];
+
+            return array_shift($responses) ?? new MockResponse('', ['http_code' => 500]);
+        });
+
+        return new DocsApplication(new DocsFetcher($client), $this->diagnostics);
+    }
+
+    /** Everything the composed documentation server wrote to its stream. */
+    private function diagnostic(): string
+    {
+        rewind($this->diagnostics);
+
+        return (string) stream_get_contents($this->diagnostics);
+    }
+
     private function documents(): Documents
     {
         return new Documents(new InstalledPackages([
@@ -332,7 +476,7 @@ final class OrbitronMcpApplicationTest extends TestCase
         $output = fopen('php://memory', 'r+');
         self::assertIsResource($output);
 
-        $application = new OrbitronMcpApplication($this->project->root, $this->documents());
+        $application = new OrbitronMcpApplication($this->project->root, $this->docs(), $this->documents());
 
         new StdioLoop()->run(new McpServer($application->serverInfo(), $application), $input, $output);
 

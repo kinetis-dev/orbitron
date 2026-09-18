@@ -87,6 +87,34 @@ final class ContextTest extends TestCase
         );
     }
 
+    /**
+     * The one operation that leaves this machine is stated with its
+     * bounds where an agent reading the document meets it, and the MCP
+     * section names both resource families rather than the context
+     * alone.
+     */
+    public function test_it_states_the_bounded_remote_documentation_read(): void
+    {
+        $document = self::context()->toArray();
+        $limits = implode("\n", $document['harness']['limits']);
+
+        self::assertStringContainsString('`kinetis://docs/*`', $limits);
+        self::assertStringContainsString('over HTTPS from one fixed origin', $limits);
+        self::assertStringContainsString('No message chooses the origin, the ref or the page path', $limits);
+        self::assertStringContainsString('the commands reach no network at all', $limits);
+        // The claim this replaced: the MCP server does reach one.
+        self::assertStringNotContainsString('no HTTP client', $limits);
+
+        self::assertSame(
+            ['kinetis://orbitron/context', 'kinetis://docs/<page>'],
+            array_column($document['mcp']['resources'], 'uri'),
+        );
+        self::assertStringContainsString(
+            'kinetis://docs/agent-workflow',
+            implode("\n", $document['workflow']),
+        );
+    }
+
     public function test_it_links_to_the_authoritative_kinetis_guides(): void
     {
         $urls = array_column(self::context()->toArray()['guides'], 'url', 'title');
@@ -155,6 +183,7 @@ final class ContextTest extends TestCase
         yield 'launcher cache claim' => ['.kinetis-cache/compiled.php'];
         yield 'scaffold command' => ['orbitron:scaffold'];
         yield 'scaffold controller target' => ['src/Http/HealthController.php'];
+        yield 'documentation entry resource' => ['kinetis://docs/agent-workflow'];
     }
 
     /**

@@ -22,11 +22,15 @@ use SplFileInfo;
  * Both are read off the package itself rather than restated here.
  *
  * The scans below cover Orbitron's own source and nothing beyond it.
- * They are not a claim about the vendor code it calls:
- * `Composer\InstalledVersions::getInstalled()` loads
- * `vendor/composer/installed.php` itself, which together with the
- * project's own `composer.json` is the whole file-read set the
- * documented boundary admits to.
+ * They are not a claim about the vendor code it calls, and two of those
+ * calls reach past this package. `Composer\InstalledVersions::getInstalled()`
+ * loads `vendor/composer/installed.php` itself, which together with the
+ * project's own `composer.json` is the whole file-read set the documented
+ * boundary admits to. `Kinetis\McpDocs\DocsApplication`, which the MCP
+ * server composes, fetches a documentation page over HTTPS from its own
+ * fixed origin under its own bounds. Neither is opened from here, and the
+ * import test below is what keeps the set of types this package can reach
+ * from growing without a decision.
  *
  * Writing is narrower still. One file creates files, one file removes
  * one, and the only mode either opens is the exclusive create the
@@ -72,7 +76,9 @@ final class PackageBoundaryTest extends TestCase
      * bootstrap and no discovery plugin, so installing Orbitron adds
      * nothing to an application's runtime surface. The one binary is the
      * MCP server, which is launched by a client rather than registered
-     * with the framework.
+     * with the framework. The documentation server is a runtime
+     * dependency because that binary composes it, so it must be
+     * installed with this package rather than configured separately.
      *
      * @throws \JsonException
      */
@@ -86,6 +92,7 @@ final class PackageBoundaryTest extends TestCase
             [
                 'php' => '^8.4',
                 'kinetis/framework' => 'dev-main',
+                'kinetis/mcp-docs' => 'dev-main',
                 'kinetis/mcp-protocol' => 'dev-main',
                 'composer-runtime-api' => '^2.0',
             ],
@@ -97,7 +104,8 @@ final class PackageBoundaryTest extends TestCase
      * Installing the MCP server must not install the application MCP
      * package with it: that one contributes a bootstrap and a discovery
      * plugin, so it would change what a consumer application does at
-     * runtime. Orbitron depends on the protocol package alone.
+     * runtime. Orbitron depends on the protocol and documentation
+     * packages, and neither registers anything with the framework.
      *
      * @throws \JsonException
      */
@@ -144,6 +152,11 @@ final class PackageBoundaryTest extends TestCase
         }
     }
 
+    /**
+     * Orbitron's own source makes none of these calls. The MCP server's
+     * one remote read is kinetis/mcp-docs' bounded page fetch, issued
+     * from that package.
+     */
     #[DataProvider('forbiddenCallProvider')]
     public function test_production_code_calls_no_network_environment_process_or_write_function(string $function): void
     {
@@ -254,10 +267,14 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The exact set of types the production code imports. An application
-     * boot dependency — a container scope, a Config, a package bootstrap
-     * — would have to appear here first, and so would anything from
-     * `kinetis/mcp`, whose installation registers both.
+     * The exact set of types the production code imports.
+     * `Kinetis\McpDocs\DocsApplication` is the one that reaches the
+     * network, composed whole rather than reimplemented — its fetcher,
+     * catalogue and page types are absent, because nothing here
+     * constructs or configures them. An application boot dependency — a
+     * container scope, a Config, a package bootstrap — would have to
+     * appear here first, and so would anything from `kinetis/mcp`, whose
+     * installation registers both.
      */
     public function test_production_code_imports_only_the_command_contract_and_composers_installed_set(): void
     {
@@ -278,6 +295,7 @@ final class PackageBoundaryTest extends TestCase
                 'JsonException',
                 'Kinetis\Console\Attributes\Command',
                 'Kinetis\Console\CommandArguments',
+                'Kinetis\McpDocs\DocsApplication',
                 'Kinetis\McpProtocol\Exception\JsonRpcException',
                 'Kinetis\McpProtocol\McpApplication',
                 'Kinetis\McpProtocol\ProgressEmitter',

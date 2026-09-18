@@ -10,9 +10,11 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 /**
- * The retention rules every Orbitron document is built on. Each case
- * constructs the records directly, so none of this depends on what
- * happens to be installed beside the suite.
+ * The retention rules every Orbitron document is built on. Every rule is
+ * decided from records constructed here, so none of it depends on what
+ * happens to be installed beside the suite; the last case reads
+ * Composer's own set, which is what proves the production reader builds
+ * those records correctly.
  */
 final class InstalledPackagesTest extends TestCase
 {
@@ -73,6 +75,46 @@ final class InstalledPackagesTest extends TestCase
         self::assertSame([], $packages->records());
     }
 
+    /**
+     * The other name Composer lists that is not a dependency: the root
+     * project itself. A skeleton application reporting `kinetis/skeleton`
+     * among its installed packages, at a version, says the project
+     * installed itself. Every other record keeps its place and its order.
+     */
+    public function test_it_omits_the_composer_root_project_from_the_records(): void
+    {
+        $packages = new InstalledPackages([
+            new PackageFact('kinetis/skeleton', '1.3.0', '/app', root: true),
+            new PackageFact('kinetis/orbitron', '1.1.0', '/app/vendor/kinetis/orbitron'),
+            new PackageFact('kinetis/framework', '1.11.2', '/app/vendor/kinetis/framework'),
+        ]);
+
+        self::assertSame(
+            [
+                ['name' => 'kinetis/framework', 'version' => '1.11.2'],
+                ['name' => 'kinetis/orbitron', 'version' => '1.1.0'],
+            ],
+            $packages->records(),
+        );
+    }
+
+    /**
+     * Orbitron is the root package while this package is being developed,
+     * and the version it reports is its own. Omitting the root from the
+     * records must not take that version with it — the two are separate
+     * questions asked of the same record.
+     */
+    public function test_a_root_orbitron_names_its_own_version_while_staying_out_of_the_records(): void
+    {
+        $packages = new InstalledPackages([
+            new PackageFact('kinetis/orbitron', 'dev-main', '/app/packages/orbitron', root: true),
+            new PackageFact('kinetis/framework', '1.11.2', '/app/vendor/kinetis/framework'),
+        ]);
+
+        self::assertSame('dev-main', $packages->orbitronVersion());
+        self::assertSame([['name' => 'kinetis/framework', 'version' => '1.11.2']], $packages->records());
+    }
+
     public function test_it_reports_one_entry_per_name_and_keeps_the_first_record(): void
     {
         $packages = new InstalledPackages([
@@ -131,14 +173,20 @@ final class InstalledPackagesTest extends TestCase
     }
 
     /**
-     * The production path: reading Composer's own installed set finds
-     * this very package, under the same retention rules.
+     * The production path, against the installed set this suite runs
+     * inside: Orbitron is the Composer root here, so this reads the root
+     * rule off Composer's own metadata rather than off constructed
+     * records — the version is found and the root is not reported as a
+     * dependency, while the packages it really installed are.
      */
     public function test_reading_composers_installed_set_finds_the_installed_kinetis_packages(): void
     {
         $packages = new InstalledPackages();
+        $names = array_column($packages->records(), 'name');
 
         self::assertNotSame('', $packages->orbitronVersion());
-        self::assertContains('kinetis/framework', array_column($packages->records(), 'name'));
+        self::assertNotContains('kinetis/orbitron', $names);
+        self::assertContains('kinetis/framework', $names);
+        self::assertContains('kinetis/mcp-docs', $names);
     }
 }

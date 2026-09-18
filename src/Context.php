@@ -21,11 +21,12 @@ final readonly class Context
 
     /** @var list<string> */
     private const array LIMITS = [
-        'Orbitron ships no model, no HTTP client and no shell; you supply the coding agent. Its MCP server exposes the same documents to an agent that speaks MCP, and adds no capability the commands do not have.',
+        'Orbitron ships no model and no shell; you supply the coding agent. Its MCP server exposes the same documents to an agent that speaks MCP, and adds one thing the commands do not have: the Kinetis documentation pages, as `kinetis://docs/*` resources served by kinetis/mcp-docs from inside the same connection.',
         'This document is reference material, not evidence. It does not establish that an application preserves request isolation, non-blocking I/O, or any other invariant — the guides below state the rules, and the project\'s own tests and review are what settle compliance.',
-        'The package facts below describe what is installed in this project. They say nothing about the current state of Kinetis main.',
+        'The package facts below describe what is installed in this project. They say nothing about the current state of Kinetis main. The documentation pages the MCP server serves are published from main and can describe behavior newer than these versions, so the versions below and the installed source are the authority for anything version-sensitive.',
         'Orbitron is a require-dev package. No production code depends on it, and removing it changes nothing an application does.',
         'Orbitron reads Composer\'s installed-package metadata and, for verification and scaffolding, the project\'s own `composer.json` through a bounded read — no other application source, no configuration and no credentials. The two files an applied scaffold creates are everything it writes.',
+        'Reading a `kinetis://docs/*` resource is the one operation that leaves this machine. kinetis/mcp-docs fetches that page over HTTPS from one fixed origin, with TLS verified, no redirect followed, a 10-second idle timeout, a 30-second deadline and a 4 MiB response cap; a fetch that fails is a generic MCP error, with the URL and the reason written to the server\'s own diagnostic stream. No message chooses the origin, the ref or the page path, and the commands reach no network at all.',
         'The scaffold builds one fixed thing: `src/Http/HealthController.php` and `tests/Http/HealthControllerTest.php`, a `GET /health` route returning `{"status":"ok"}`, and a framework test that asserts that same response on two sequential requests. There is no name, path, template or other input, it creates no directory, and it writes only when `--apply` is given.',
         'Orbitron reads no application source, so it cannot tell you in advance whether the project already routes `GET /health` somewhere else. The generated test surfaces that conflict through the framework\'s own route discovery, on the first run after the scaffold is applied.',
         'Verification answers one narrow question: whether this project\'s Composer layout is the fixed one Orbitron supports. That layout is narrower than anything Kinetis itself requires, so an error means the project is outside what Orbitron assumes — not that route, command or listener discovery is broken. It establishes nothing else either: not request isolation, not non-blocking I/O, not security, not route uniqueness, not the correctness of any application code.',
@@ -47,8 +48,8 @@ final readonly class Context
         'Run `vendor/bin/kinetis orbitron:inspect` to read the installed Kinetis packages and their versions as JSON.',
         'Run `vendor/bin/kinetis orbitron:verify` to read whether this project\'s Composer layout is the one Orbitron supports; exit 3 means the document reports an error.',
         'Run `vendor/bin/kinetis orbitron:scaffold` to read the health-endpoint scaffold plan, and add `--apply` to create its two files; exit 3 means the document reports a refusal or a failed write.',
-        'An agent that speaks MCP can register `vendor/bin/kinetis-orbitron-mcp` instead and call the same documents as tools.',
-        'Route the task through Agent Workflow, then follow the matching recipe — reading each guide for the versions orbitron:inspect reports, not for main.',
+        'An agent that speaks MCP can register `vendor/bin/kinetis-orbitron-mcp` instead and call the same documents as tools, with the Kinetis documentation served as resources from that one connection — there is no second server to configure.',
+        'Route the task through Agent Workflow — over MCP, read the `kinetis://docs/agent-workflow` resource — then follow the matching recipe, reading each guide for the versions orbitron:inspect reports, not for main.',
         'Before calling the change done, work through Agent Correctness Review and run the project\'s own test suite.',
     ];
 
@@ -76,7 +77,7 @@ final readonly class Context
         ],
     ];
 
-    /** @var array{binary: string, protocolVersion: string, tools: list<array{name: string, effect: string}>, resource: string} */
+    /** @var array{binary: string, protocolVersion: string, tools: list<array{name: string, effect: string}>, resources: list<array{uri: string, effect: string}>} */
     private const array MCP = [
         'binary' => 'vendor/bin/kinetis-orbitron-mcp',
         'protocolVersion' => '2025-06-18',
@@ -98,13 +99,24 @@ final readonly class Context
                 'effect' => 'Returns the same document as `orbitron:scaffold --apply`, and creates the two files. This is the only tool that writes; selecting it is the whole mutation request, so it takes no argument, and your MCP client\'s configured approval policy controls whether it runs.',
             ],
         ],
-        'resource' => 'kinetis://orbitron/context',
+        'resources' => [
+            [
+                'uri' => 'kinetis://orbitron/context',
+                'effect' => 'This document, as Markdown. Read locally, from the same facts the commands print.',
+            ],
+            [
+                'uri' => 'kinetis://docs/<page>',
+                'effect' => 'One Kinetis documentation page, as Markdown. The catalogue and the bounded HTTPS fetch behind it belong to kinetis/mcp-docs, which this server composes rather than copies; `resources/list` names every page. Start at `kinetis://docs/agent-workflow`.',
+            ],
+        ],
     ];
 
     private const string SERVER = 'The MCP server speaks one protocol revision and serves the same documents the '
-        . 'commands print. It never boots the Kinetis application, accepts no path, source, URL or command from a '
-        . 'message, and every tool takes no arguments at all. It is a local process your client launches, so that '
-        . 'process and your filesystem permissions are the trust boundary.';
+        . 'commands print, plus the documentation catalogue. It never boots the Kinetis application, accepts no path, '
+        . 'source, URL, origin, ref or command from a message, and every tool takes no arguments at all. It is a '
+        . 'local process your client launches, so that process and your filesystem permissions are the trust '
+        . 'boundary for everything it reads and writes here; the one thing it reaches beyond them is the fixed '
+        . 'documentation origin named above.';
 
     private const string LAUNCHER = 'An invocation changes more than the command itself does, and the rest is not '
         . 'side-effect-free. `vendor/bin/kinetis` loads `.env` before it dispatches any command, and under '
@@ -122,7 +134,7 @@ final readonly class Context
      *     guides: list<array{title: string, url: string}>,
      *     workflow: list<string>,
      *     commands: list<array{name: string, formats: list<string>, effect: string}>,
-     *     mcp: array{binary: string, protocolVersion: string, tools: list<array{name: string, effect: string}>, resource: string},
+     *     mcp: array{binary: string, protocolVersion: string, tools: list<array{name: string, effect: string}>, resources: list<array{uri: string, effect: string}>},
      *     server: string,
      *     launcher: string,
      *     packages: list<array{name: string, version: string}>,
@@ -202,7 +214,10 @@ final readonly class Context
             $lines[] = "- `{$tool['name']}` — {$tool['effect']}";
         }
 
-        $lines[] = "- Resource `{$document['mcp']['resource']}` — this document, as Markdown.";
+        foreach ($document['mcp']['resources'] as $resource) {
+            $lines[] = "- Resource `{$resource['uri']}` — {$resource['effect']}";
+        }
+
         $lines[] = '';
         $lines[] = $document['server'];
         $lines[] = '';

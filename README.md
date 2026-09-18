@@ -37,6 +37,10 @@ before you apply it. Only applying the scaffold changes anything, and what
 it changes is two fixed files. None of the four is evidence that
 application code is correct.
 
+Over MCP it also serves the Kinetis documentation, so the agent reads the
+guidance from the same connection instead of a second server you would
+have to configure and it could skip.
+
 ```console
 composer require --dev kinetis/orbitron
 ```
@@ -44,7 +48,10 @@ composer require --dev kinetis/orbitron
 Reach them either way: four commands on `vendor/bin/kinetis`, each
 writing one document to STDOUT, or the stdio MCP server
 `vendor/bin/kinetis-orbitron-mcp`, which serves the same documents as
-tools. Orbitron has no model of its own, no HTTP client and no shell.
+tools and the documentation as resources. Orbitron has no model of its
+own and no shell. The commands reach no network; reading a documentation
+resource over MCP is the one thing that does, and [it is bounded
+below](#over-mcp).
 
 ## `orbitron:context`
 
@@ -71,15 +78,23 @@ writing `--format=json` are the same invocation.
 ```json
 {
     "schemaVersion": 1,
-    "orbitronVersion": "1.0.0",
+    "orbitronVersion": "1.1.0",
     "packages": [
         {
             "name": "kinetis/framework",
-            "version": "1.11.2"
+            "version": "1.12.0"
+        },
+        {
+            "name": "kinetis/mcp-docs",
+            "version": "1.4.0"
+        },
+        {
+            "name": "kinetis/mcp-protocol",
+            "version": "1.0.0"
         },
         {
             "name": "kinetis/orbitron",
-            "version": "1.0.0"
+            "version": "1.1.0"
         }
     ]
 }
@@ -90,6 +105,13 @@ ordered by name, one entry per name. A name that Composer only lists
 because an installed package *replaces* or *provides* it has no version
 and no install path, and is not reported. Install paths are read to make
 that distinction and never appear in the output.
+
+The Composer root project is not reported either. Composer lists it among
+the installed packages, but it is the project being developed rather than
+something the project installed, so a root under the `kinetis/` vendor —
+`kinetis/skeleton`, or `kinetis/orbitron` itself while this package is
+developed — is left out of `packages`. `orbitronVersion` still reads it,
+which is how Orbitron names its version when it is the root.
 
 `orbitronVersion` is the detected `kinetis/orbitron` package version, so
 it cannot disagree with what is installed; in the Kinetis monorepo that
@@ -107,7 +129,7 @@ fixed key and check order:
 ```json
 {
     "schemaVersion": 1,
-    "orbitronVersion": "1.0.0",
+    "orbitronVersion": "1.1.0",
     "status": "pass",
     "checks": [
         {
@@ -211,7 +233,7 @@ nothing touched on disk.
 ```json
 {
     "schemaVersion": 1,
-    "orbitronVersion": "1.0.0",
+    "orbitronVersion": "1.1.0",
     "mode": "preview",
     "status": "ready",
     "codes": [
@@ -320,6 +342,7 @@ the per-client configuration paths.
 | `orbitron_scaffold_plan` | The `orbitron:scaffold` preview document. Read-only. |
 | `orbitron_scaffold_apply` | The `orbitron:scaffold --apply` document, and creates the two files. |
 | `kinetis://orbitron/context` | The `orbitron:context` document, as Markdown. |
+| `kinetis://docs/<page>` | One Kinetis documentation page, as Markdown. `resources/list` names every page; start at `kinetis://docs/agent-workflow`. |
 
 `orbitron_scaffold_apply` writes to the project. Selecting it *is* the
 mutation request: it takes no argument, and your MCP client's own
@@ -329,20 +352,45 @@ apply refuses rather than overwriting.
 
 All four tools publish a closed, empty input schema and refuse a call
 carrying any argument. No message can name a project root, a path, a
-source body, a URL or a command, and the server never boots the Kinetis
-application. Composer's installed-package inventory is process-cached, so
-restart the server after installing or removing a dependency; every other
-document is re-read on each call.
+source body, a URL, an origin, a ref or a command, and the server never
+boots the Kinetis application. Composer's installed-package inventory is
+process-cached, so restart the server after installing or removing a
+dependency; every other document is re-read on each call.
+
+### The documentation resources
+
+[`kinetis/mcp-docs`](https://kinetis.dev/docs/mcp-docs.html) owns the
+catalogue and the fetch. Orbitron installs it as a dependency and
+publishes its resources from this one connection, composing that server
+rather than copying it, so registering Orbitron is the whole
+registration: there is nothing else to add for the documentation. The
+package stays framework-agnostic and independently installable, so a
+project that wants the documentation without the harness registers
+`vendor/bin/kinetis-mcp-docs` on its own instead of Orbitron.
+
+A page is fetched when it is read, from a URL built out of that package's
+two constants — nothing chooses an origin, a ref or a path. TLS is
+verified, no redirect is followed, a 10-second idle timeout and a
+30-second deadline bound the request, the body is abandoned as soon as it
+passes a 4 MiB cap, and one that is not valid UTF-8 is refused rather
+than encoded. A fetch that fails is a generic MCP error naming only the
+URI that was asked for; the URL, the status and the transport's message
+go to the server's stderr, where your client's own log is what shows
+them. Stdout carries JSON-RPC frames and nothing else.
+
+Those pages are published from `main`, so they can describe behavior
+newer than this project has installed. `orbitron_inspect` and the
+installed source stay the authority for anything version-sensitive.
 
 ## Wire it into a project
 
 `kinetis/skeleton` arrives with all of this in place. For an application
 that already exists, the checked-in form of the registration above is:
 
-- `composer require --dev kinetis/orbitron` — plus
-  `kinetis/mcp-protocol` in a monorepo that resolves siblings through
-  `path` repositories, because a root whose `minimum-stability` is
-  `stable` will not take that sibling's `dev-main` from Packagist;
+- `composer require --dev kinetis/orbitron` — plus `kinetis/mcp-docs`
+  and `kinetis/mcp-protocol` in a monorepo that resolves siblings
+  through `path` repositories, because a root whose `minimum-stability`
+  is `stable` will not take those siblings' `dev-main` from Packagist;
 - `bin/orbitron-mcp`, executable. For a project that runs in Docker it
   is a one-file bridge that resolves its own project directory and
   `exec`s `docker compose --project-directory "$dir" exec -T app php
@@ -352,10 +400,10 @@ that already exists, the checked-in form of the registration above is:
   `./vendor/bin/kinetis-orbitron-mcp` itself;
 - `AGENTS.md`, the one place the agent contract is written: on the first
   application task of a session, confirm the `orbitron` tools, read
-  `kinetis://orbitron/context`, call `orbitron_inspect`, call
-  `orbitron_verify`, and then either one readiness line beginning
-  `Orbitron ready` or no application change at all and the exact
-  failure;
+  `kinetis://orbitron/context` and `kinetis://docs/agent-workflow`, call
+  `orbitron_inspect`, call `orbitron_verify`, and then either one
+  readiness line beginning `Orbitron ready` or no application change at
+  all and the exact failure;
 - `CLAUDE.md` and `GEMINI.md` containing `@AGENTS.md` and nothing else;
 - `.mcp.json`, `.codex/config.toml` and `.gemini/settings.json`, each
   naming one stdio server `orbitron` launched as `./bin/orbitron-mcp`,
@@ -405,16 +453,23 @@ to stdout fails.
 
 ## Trust boundary
 
-Orbitron reads three things and nothing more: Composer's
+Orbitron reads three things on this machine and nothing more: Composer's
 installed-package metadata, the project's own `composer.json` — bounded
 as described above — and, for the scaffold, the existence and symlink
 state of four fixed directories and two fixed paths. No other application
-source, no configuration, no credentials. It opens no socket and starts
-no process. Reading the installed metadata goes through
-`Composer\InstalledVersions`, which loads `vendor/composer/installed.php`
-itself; Orbitron reaches nothing beyond it. Every command declares
-`bootstrap: false`, and the MCP binary boots no application at all, so no
-package or application bootstrap runs either way.
+source, no configuration, no credentials. It starts no process. Reading
+the installed metadata goes through `Composer\InstalledVersions`, which
+loads `vendor/composer/installed.php` itself; Orbitron reaches nothing
+beyond it. Every command declares `bootstrap: false`, and the MCP binary
+boots no application at all, so no package or application bootstrap runs
+either way.
+
+One operation leaves this machine, and only over MCP: reading a
+`kinetis://docs/*` resource, which `kinetis/mcp-docs` fetches over HTTPS
+from its own fixed origin under the bounds
+[above](#the-documentation-resources). It carries no credential, sends
+nothing about your project, and no message can redirect it. The four
+commands and all four tools reach no network at all.
 
 It writes two files, both fixed, both only on `orbitron:scaffold --apply`
 or `orbitron_scaffold_apply`, and both through a create that refuses an
