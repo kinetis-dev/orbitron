@@ -137,6 +137,44 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('Agent Correctness Review', $workflow);
     }
 
+    /**
+     * An agent that runs the suite twice at once against one database or
+     * broker reads the resulting interference as a defect in the code it
+     * just changed. The rule that prevents it belongs in the workflow
+     * the agent reads, as a requirement rather than a preference.
+     */
+    public function test_the_workflow_requires_shared_state_runs_to_be_serialized(): void
+    {
+        $workflow = implode("\n", self::context()->toArray()['workflow']);
+
+        self::assertStringContainsString('shared database, broker or object store one at a time', $workflow);
+        self::assertStringContainsString('never two overlapping runs against the same state', $workflow);
+        self::assertStringContainsString('reports failures the code does not have', $workflow);
+    }
+
+    /**
+     * The document's shape is what an MCP client and any other consumer
+     * parse. Prose is added to a list the schema already has; a new
+     * top-level key would be a breaking change to that contract.
+     */
+    public function test_the_document_keys_are_the_published_schema(): void
+    {
+        self::assertSame(
+            [
+                'orbitronVersion',
+                'harness',
+                'guides',
+                'workflow',
+                'commands',
+                'mcp',
+                'server',
+                'launcher',
+                'packages',
+            ],
+            array_keys(self::context()->toArray()),
+        );
+    }
+
     public function test_each_command_entry_states_what_it_may_change(): void
     {
         $commands = self::context()->toArray()['commands'];
@@ -184,6 +222,7 @@ final class ContextTest extends TestCase
         yield 'scaffold command' => ['orbitron:scaffold'];
         yield 'scaffold controller target' => ['src/Http/HealthController.php'];
         yield 'documentation entry resource' => ['kinetis://docs/agent-workflow'];
+        yield 'serialized shared-state rule' => ['shared database, broker or object store one at a time'];
     }
 
     /**

@@ -51,6 +51,7 @@ final readonly class Context
         'An agent that speaks MCP can register `vendor/bin/kinetis-orbitron-mcp` instead and call the same documents as tools, with the Kinetis documentation served as resources from that one connection — there is no second server to configure.',
         'Route the task through Agent Workflow — over MCP, read the `kinetis://docs/agent-workflow` resource — then follow the matching recipe, reading each guide for the versions orbitron:inspect reports, not for main.',
         'Before calling the change done, work through Agent Correctness Review and run the project\'s own test suite.',
+        'Run any test or command that mutates a shared database, broker or object store one at a time, never two overlapping runs against the same state: concurrent mutation breaks test isolation and reports failures the code does not have.',
     ];
 
     /** @var list<array{name: string, formats: list<string>, effect: string}> */

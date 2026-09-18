@@ -83,7 +83,7 @@ final class ContextCommandTest extends TestCase
 
         $json = $this->output->contents();
 
-        foreach (['1.0.0', 'kinetis/framework', '1.11.2', 'https://kinetis.dev/docs/agent-workflow.html'] as $fact) {
+        foreach (['1.0.0', 'kinetis/framework', '1.11.2', 'https://kinetis.dev/docs/agent-workflow.html', 'shared database, broker or object store one at a time'] as $fact) {
             self::assertStringContainsString($fact, $markdown);
             self::assertStringContainsString($fact, $json);
         }
