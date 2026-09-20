@@ -24,17 +24,21 @@ use SplFileInfo;
  * The scans below cover Orbitron's own source and nothing beyond it.
  * They are not a claim about the vendor code it calls, and two of those
  * calls reach past this package. `Composer\InstalledVersions::getInstalled()`
- * loads `vendor/composer/installed.php` itself, which together with the
- * project's own `composer.json` is the whole file-read set the documented
- * boundary admits to. `Kinetis\McpDocs\DocsApplication`, which the MCP
- * server composes, fetches a documentation page over HTTPS from its own
- * fixed origin under its own bounds. Neither is opened from here, and the
- * import test below is what keeps the set of types this package can reach
- * from growing without a decision.
+ * loads `vendor/composer/installed.php` itself. That file, the project's
+ * own `composer.json`, and the admitted files beneath the install roots
+ * Composer names — `composer.json`, `README.md` and what lies under
+ * `src/`, `bin/` or `resources/` in an installed `kinetis/*` package —
+ * are the whole file-read set the documented boundary admits to.
+ * `Kinetis\McpDocs\DocsApplication`, which the MCP server composes,
+ * fetches a documentation page over HTTPS from its own fixed origin
+ * under its own bounds. Neither is opened from here, and the import test
+ * below is what keeps the set of types this package can reach from
+ * growing without a decision.
  *
  * Writing is narrower still. One file creates files, one file removes
  * one, and the only mode either opens is the exclusive create the
  * scaffold's two targets need; no production file creates a directory.
+ * Everything else that opens a file opens it read-only and bounded.
  */
 final class PackageBoundaryTest extends TestCase
 {
@@ -172,12 +176,18 @@ final class PackageBoundaryTest extends TestCase
     /**
      * `fopen()` is the one exception to the write list above:
      * `file_get_contents()` is unbounded and stays forbidden, and a file
-     * that must not already exist cannot be created any other way. Two
-     * calls exist, in two files, and each names the one mode it is for.
+     * that must not already exist cannot be created any other way. Three
+     * calls exist, in three files, and each names the one mode it is
+     * for: the project manifest read, the installed-source read, and the
+     * scaffold's exclusive create.
      */
-    public function test_the_only_files_opened_are_the_manifest_read_and_the_exclusive_create(): void
+    public function test_the_only_files_opened_are_the_two_bounded_reads_and_the_exclusive_create(): void
     {
-        $modes = ['ProjectLayout.php' => 'fopen($path, \'rb\')', 'FileScaffoldWriter.php' => 'fopen($path, \'x+b\')'];
+        $modes = [
+            'ProjectLayout.php' => 'fopen($path, \'rb\')',
+            'PackageSourceReader.php' => 'fopen($target, \'rb\')',
+            'FileScaffoldWriter.php' => 'fopen($path, \'x+b\')',
+        ];
 
         foreach (self::sourceFiles() as $path => $contents) {
             $opens = preg_match_all('/fopen\s*\(/', $contents);
@@ -233,18 +243,28 @@ final class PackageBoundaryTest extends TestCase
     }
 
     /**
-     * The read is bounded by construction: one byte past the admitted
-     * size is all that separates an accepted manifest from an oversized
-     * one, and nothing ever reads the stream to its end.
+     * @return iterable<string, array{string, string}>
      */
-    public function test_the_manifest_read_is_bounded_by_the_admitted_size_plus_one_byte(): void
+    public static function boundedReadProvider(): iterable
     {
-        $reader = self::sourceFiles()['ProjectLayout.php'];
+        yield 'project manifest' => ['ProjectLayout.php', 'stream_get_contents($handle, self::MAX_MANIFEST_BYTES + 1)'];
+        yield 'installed source' => [
+            'PackageSourceReader.php',
+            'stream_get_contents($handle, self::MAX_SOURCE_BYTES + 1)',
+        ];
+    }
 
-        self::assertStringContainsString(
-            'stream_get_contents($handle, self::MAX_MANIFEST_BYTES + 1)',
-            $reader,
-        );
+    /**
+     * Both reads are bounded by construction: one byte past the admitted
+     * size is all that separates an accepted file from an oversized one,
+     * and nothing ever reads a stream to its end.
+     */
+    #[DataProvider('boundedReadProvider')]
+    public function test_a_bounded_read_asks_for_the_admitted_size_plus_one_byte(string $file, string $call): void
+    {
+        $reader = self::sourceFiles()[$file];
+
+        self::assertStringContainsString($call, $reader);
         self::assertSame(1, preg_match_all('/stream_get_contents\s*\(/', $reader));
     }
 
@@ -307,7 +327,9 @@ final class PackageBoundaryTest extends TestCase
                 'Kinetis\McpProtocol\ToolResult',
                 'Kinetis\Orbitron\Document',
                 'Kinetis\Orbitron\Documents',
+                'Kinetis\Orbitron\InstalledPackages',
                 'Kinetis\Orbitron\JsonDocument',
+                'Kinetis\Orbitron\PackageSourceReader',
                 'Kinetis\Orbitron\ScaffoldMode',
                 'Kinetis\Runtime\ProjectRoot',
                 'RuntimeException',

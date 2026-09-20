@@ -37,9 +37,11 @@ before you apply it. Only applying the scaffold changes anything, and what
 it changes is two fixed files. None of the four is evidence that
 application code is correct.
 
-Over MCP it also serves the Kinetis documentation, so the agent reads the
-guidance from the same connection instead of a second server you would
-have to configure and it could skip.
+Over MCP it also serves the Kinetis documentation and two more tools that
+reach an installed `kinetis/*` package's own source — one reads a bounded
+line window of a file, the other searches one file for a literal string.
+That is the exact source this project has installed, when a guide
+published from main could describe a newer release.
 
 ```console
 composer require --dev kinetis/orbitron
@@ -48,10 +50,10 @@ composer require --dev kinetis/orbitron
 Reach them either way: four commands on `vendor/bin/kinetis`, each
 writing one document to STDOUT, or the stdio MCP server
 `vendor/bin/kinetis-orbitron-mcp`, which serves the same documents as
-tools and the documentation as resources. Orbitron has no model of its
-own and no shell. The commands reach no network; reading a documentation
-resource over MCP is the one thing that does, and [it is bounded
-below](#over-mcp).
+tools, the installed-source reader, and the documentation as resources.
+Orbitron has no model of its own and no shell. The commands reach no
+network; reading a documentation resource over MCP is the one thing that
+does, and [it is bounded below](#over-mcp).
 
 ## `orbitron:context`
 
@@ -346,6 +348,8 @@ the per-client configuration paths.
 | `orbitron_verify` | The `orbitron:verify` document. Read-only; an error document comes back as an MCP error result still carrying the document. |
 | `orbitron_scaffold_plan` | The `orbitron:scaffold` preview document. Read-only. |
 | `orbitron_scaffold_apply` | The `orbitron:scaffold --apply` document, and creates the two files. |
+| `orbitron_read_package_source` | One line window of one installed `kinetis/*` package's own source. Read-only. |
+| `orbitron_search_package_source` | The lines of one such file that contain a literal string. Read-only. |
 | `kinetis://orbitron/context` | The `orbitron:context` document, as Markdown. |
 | `kinetis://docs/<page>` | One Kinetis documentation page, as Markdown. `resources/list` names every page; start at `kinetis://docs/agent-workflow`. |
 
@@ -355,12 +359,81 @@ approval policy is what decides whether it runs. It is annotated
 `destructiveHint: true` and `idempotentHint: false`, because a second
 apply refuses rather than overwriting.
 
-All four tools publish a closed, empty input schema and refuse a call
-carrying any argument. No message can name a project root, a path, a
-source body, a URL, an origin, a ref or a command, and the server never
-boots the Kinetis application. Composer's installed-package inventory is
-process-cached, so restart the server after installing or removing a
-dependency; every other document is re-read on each call.
+Four tools publish a closed, empty input schema and refuse a call
+carrying any argument. The other two, `orbitron_read_package_source` and
+`orbitron_search_package_source`, have schemas of their own — see below.
+No message can otherwise name a project root, a source body, a URL, an
+origin, a ref or a command, and the server never boots the Kinetis
+application.
+
+The server reads this project's generated
+`vendor/composer/installed.php` again for every operation that reports or
+uses installed package facts, so a completed `composer require`, `remove`
+or `update` is visible to the next such call — there is nothing to restart
+or reconnect. One operation reads it once, so the version a document
+reports and the source a read opens always come from the same inventory,
+and the snapshot is discarded with the response. An inventory that is
+absent or not the generated shape fails an operation that needs it rather
+than producing an answer from an older one. Every other document, and the
+file content the two installed-source tools report, is re-read on each
+call too.
+
+### The installed-source tools
+
+`orbitron_read_package_source` reads one bounded line window of one
+installed `kinetis/*` package's own source — the exact source this
+project has installed, when a documentation page published from `main`
+could describe a newer release.
+
+| Argument | Type | Constraint |
+|---|---|---|
+| `package` | string | Required, non-empty, an installed `kinetis/*` package name. |
+| `path` | string | Required, non-empty, at most 256 Unicode code points. |
+| `startLine` | integer | Optional, at least 1, default `1`. |
+| `lineCount` | integer | Optional, 1 to 200, default `200`. |
+
+`path` must resolve to exact `composer.json`, exact `README.md`, or a
+file beneath `src/`, `bin/` or `resources/`. The resolved target — a
+symlink included, re-admitted against that same location once resolved —
+must stay inside it, must be a regular file, must be at most 1 MiB, and
+must be UTF-8 text with no NUL byte. Every argument is validated against
+this schema before any lookup or read runs; a call outside it is a
+JSON-RPC `-32602` protocol error, not a refusal document.
+
+A success reports `status: "ok"`, `package`, `version`, `path`,
+`startLine`, `endLine`, `hasMore` and `content`. `hasMore: true` is a
+success, not a refusal: continue by calling again with `startLine` set
+to `endLine + 1` until the needed evidence is in view or `hasMore` is
+`false`. A refusal reports only `status: "error"` and one `code`:
+`package_unknown`, `path_not_admitted`, `source_missing`,
+`source_unreadable`, `source_oversize`, `source_not_text`, or
+`line_out_of_range`.
+
+`orbitron_search_package_source` searches one such file instead of
+paging through it, and takes the same `package` and `path`:
+
+| Argument | Type | Constraint |
+|---|---|---|
+| `query` | string | Required, non-empty, at most 256 Unicode code points. |
+| `startLine` | integer | Optional, at least 1, default `1`. |
+
+The scan is literal and case-sensitive — no pattern, no case mode, no
+result count, and one file per call rather than a directory or a
+package. A success reports `status: "ok"`, `package`, `version`, `path`,
+`query`, `startLine`, `matches` and `hasMore`. `matches` lists at most
+50 `{"line": <integer>, "content": <string>}` entries in source order,
+each line without the newline the file stores after it; finding nothing
+is a success with an empty list. `hasMore: true` means a later line
+matches too — call again with `startLine` set to the last reported line
+plus one. The refusal codes are the ones above.
+
+Use them together: derive a file from the class and that package's own
+`composer.json` autoload map, or find it by searching the package's
+`README.md` for the option or term, then search the file and read a
+window around a reported line. Neither tool lists a directory or
+searches across a package, so locating the file is the caller's own
+work — read `vendor/kinetis/<package>` directly when neither route
+finds it.
 
 ### The documentation resources
 
@@ -398,10 +471,18 @@ that already exists, the checked-in form of the registration above is:
   is `stable` will not take those siblings' `dev-main` from Packagist;
 - `bin/orbitron-mcp`, executable. For a project that runs in Docker it
   is a one-file bridge that resolves its own project directory and
-  `exec`s `docker compose --project-directory "$dir" exec -T app php
-  vendor/bin/kinetis-orbitron-mcp`; `-T` is required, because an
-  allocated TTY would rewrite the protocol's newline-delimited frames.
-  With PHP on the host there is no bridge — the launcher is
+  `run`s a disposable container from the `app` service's own image —
+  `docker compose --project-directory "$dir" run --rm -T --no-deps
+  --entrypoint php app vendor/bin/kinetis-orbitron-mcp` — sharing
+  `app`'s mounts but not its process lifecycle, so restarting,
+  recreating or rebuilding `app` does not disconnect an established
+  session. `--entrypoint php` skips the application entrypoint's
+  `composer install`; `--no-deps` starts only this one container; `-T`
+  is required, because an allocated TTY would rewrite the protocol's
+  newline-delimited frames. The stack's initial `docker compose up
+  --build -d` must have completed at least once, so the image is
+  available and its vendor volume is populated with dependencies. With
+  PHP on the host there is no bridge — the launcher is
   `./vendor/bin/kinetis-orbitron-mcp` itself;
 - `AGENTS.md`, the one place the agent contract is written: on the first
   application task of a session, confirm the `orbitron` tools, read
@@ -431,8 +512,7 @@ server into it.
 The [Orbitron documentation](https://kinetis.dev/docs/orbitron.html)
 carries the full recipe — the bridge verbatim, each configuration file,
 the readiness and blocked handshake, the shell fallback, and the
-diagnostics for a stopped container, a disconnected server and a stale
-package inventory.
+diagnostics for a stopped container and a disconnected server.
 
 ## Output and exit codes
 
@@ -461,29 +541,44 @@ to stdout fails.
 Orbitron reads three things on this machine and nothing more: Composer's
 installed-package metadata, the project's own `composer.json` — bounded
 as described above — and, for the scaffold, the existence and symlink
-state of four fixed directories and two fixed paths. No other application
-source, no configuration, no credentials. It starts no process. Reading
-the installed metadata goes through `Composer\InstalledVersions`, which
-loads `vendor/composer/installed.php` itself; Orbitron reaches nothing
-beyond it. Every command declares `bootstrap: false`, and the MCP binary
-boots no application at all, so no package or application bootstrap runs
-either way.
+state of four fixed directories and two fixed paths. Over MCP only, it
+also reads a bounded line window of one installed, non-root `kinetis/*`
+package's own `composer.json`, `README.md`, or a file beneath `src/`,
+`bin/` or `resources/`, and searches one such file for a literal string —
+never a non-`kinetis/*` package, the Composer root project, or the
+application's own source. No configuration, no
+credentials. It starts no process. That metadata is the one generated
+file `vendor/composer/installed.php`: a command reads it through
+`Composer\InstalledVersions`, which loads it itself, and the MCP server
+evaluates that same fixed path under the detected project root, which no
+message can name. Beyond that one file, the commands and four of the six
+MCP tools reach nothing else under `vendor/`; only
+`orbitron_read_package_source` and `orbitron_search_package_source` read
+further, and only inside the one admitted location of the one installed,
+non-root `kinetis/*` package a
+call names — see [The installed-source
+tools](#the-installed-source-tools). Every command declares
+`bootstrap: false`, and the MCP binary boots no application at all, so
+no package or application bootstrap runs either way.
 
 One operation leaves this machine, and only over MCP: reading a
 `kinetis://docs/*` resource, which `kinetis/mcp-docs` fetches over HTTPS
 from its own fixed origin under the bounds
 [above](#the-documentation-resources). It carries no credential, sends
 nothing about your project, and no message can redirect it. The four
-commands and all four tools reach no network at all.
+commands and all six tools reach no network at all.
 
 It writes two files, both fixed, both only on `orbitron:scaffold --apply`
 or `orbitron_scaffold_apply`, and both through a create that refuses an
 occupied path. Neither a command line nor an MCP message supplies a path
-to any of this: the project root comes from the framework's own
+to either write target: the project root comes from the framework's own
 `Kinetis\Runtime\ProjectRoot::detect()`, reading Composer's generated bin
-proxy, and every name below it is a constant. The MCP server is a local
-process your client launches, so that process and your filesystem
-permissions are the authority boundary.
+proxy, and every name below it is a constant. The two installed-source
+tools are the only calls that do take a caller-supplied path, and only
+for reading — admitted against a fixed set of locations, with the
+resolved target re-admitted, before anything reaches the filesystem. The MCP
+server is a local process your client launches, so that process and
+your filesystem permissions are the authority boundary.
 
 A command invocation as a whole is still not side-effect-free, and what
 remains belongs to the framework launcher rather than to Orbitron (the

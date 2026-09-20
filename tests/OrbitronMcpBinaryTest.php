@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Kinetis\Orbitron\Tests;
 
+use Composer\InstalledVersions;
 use JsonException;
 use Kinetis\McpDocs\DocsCatalogue;
 use Kinetis\Orbitron\HealthScaffold;
@@ -45,6 +46,7 @@ final class OrbitronMcpBinaryTest extends TestCase
 
         $this->project = new ScaffoldProject();
         $this->writeBinProxy();
+        $this->writeInventory();
     }
 
     protected function tearDown(): void
@@ -79,7 +81,14 @@ final class OrbitronMcpBinaryTest extends TestCase
         self::assertSame(OrbitronMcpApplication::SERVER_NAME, $frames[0]['result']['serverInfo']['name']);
 
         self::assertSame(
-            ['orbitron_inspect', 'orbitron_verify', 'orbitron_scaffold_plan', 'orbitron_scaffold_apply'],
+            [
+                'orbitron_inspect',
+                'orbitron_verify',
+                'orbitron_scaffold_plan',
+                'orbitron_scaffold_apply',
+                OrbitronMcpApplication::SOURCE_TOOL,
+                OrbitronMcpApplication::SEARCH_TOOL,
+            ],
             array_column($frames[1]['result']['tools'], 'name'),
         );
 
@@ -108,6 +117,99 @@ final class OrbitronMcpBinaryTest extends TestCase
             'namespace ' . rtrim($this->project->production, '\\') . '\\Http;',
             $this->project->contents(HealthScaffold::TARGETS[0]),
         );
+    }
+
+    /**
+     * A real installed package, read through the real binary: the file
+     * that comes back is kinetis/framework's own manifest, at the very
+     * version the inventory reports for it, and the frame names no path.
+     *
+     * Nothing about this is a fixture — the install root comes from the
+     * Composer metadata of the vendor tree this suite runs against.
+     *
+     * @throws JsonException
+     */
+    public function test_a_real_read_returns_an_installed_kinetis_file_at_its_installed_version(): void
+    {
+        $frames = $this->session([
+            '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"orbitron_inspect"}}',
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::SOURCE_TOOL
+            . '","arguments":{"package":"kinetis/framework","path":"composer.json","lineCount":3}}}',
+        ]);
+
+        $installed = $this->document($frames[0])['packages'];
+        self::assertIsArray($installed);
+        $versions = array_column($installed, 'version', 'name');
+
+        $read = $this->document($frames[1]);
+
+        self::assertFalse($frames[1]['result']['isError']);
+        self::assertSame('ok', $read['status']);
+        self::assertSame('kinetis/framework', $read['package']);
+        self::assertSame($versions['kinetis/framework'], $read['version']);
+        self::assertSame(1, $read['startLine']);
+        self::assertSame(3, $read['endLine']);
+        self::assertTrue($read['hasMore']);
+        self::assertStringContainsString('kinetis/framework', $read['content']);
+        self::assertStringStartsWith('{', $read['content']);
+    }
+
+    /**
+     * The search an agent actually runs, through the real binary: a
+     * literal in a real installed manifest, reported at the line it is
+     * on, with the window tool then reading that line back unchanged.
+     *
+     * @throws JsonException
+     */
+    public function test_a_real_search_locates_a_line_the_window_tool_then_reads(): void
+    {
+        $frames = $this->session([
+            '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::SEARCH_TOOL
+            . '","arguments":{"package":"kinetis/framework","path":"composer.json","query":"\"name\""}}}',
+        ]);
+
+        $search = $this->document($frames[0]);
+
+        self::assertFalse($frames[0]['result']['isError']);
+        self::assertSame('kinetis/framework', $search['package']);
+        self::assertSame('"name"', $search['query']);
+        self::assertFalse($search['hasMore']);
+        self::assertIsArray($search['matches']);
+        self::assertNotSame([], $search['matches']);
+
+        $match = $search['matches'][0];
+        self::assertStringContainsString('kinetis/framework', $match['content']);
+
+        $read = $this->document($this->session([
+            '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::SOURCE_TOOL
+            . '","arguments":{"package":"kinetis/framework","path":"composer.json","startLine":'
+            . $match['line'] . ',"lineCount":1}}}',
+        ])[0]);
+
+        self::assertSame($match['content'], rtrim($read['content'], "\r\n"));
+    }
+
+    /**
+     * A path the tool does not admit is refused by the real binary too,
+     * and the refusal names nothing about this machine.
+     *
+     * @throws JsonException
+     */
+    public function test_a_real_read_outside_the_admitted_paths_is_refused_without_a_path(): void
+    {
+        [$stdout] = $this->execute([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::SOURCE_TOOL
+            . '","arguments":{"package":"kinetis/framework","path":"../../../etc/passwd"}}}',
+        ]);
+
+        $frame = json_decode(trim($stdout), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertTrue($frame['result']['isError']);
+        self::assertSame(
+            ['status' => 'error', 'code' => 'path_not_admitted'],
+            json_decode($frame['result']['content'][0]['text'], true, flags: JSON_THROW_ON_ERROR),
+        );
+        self::assertStringNotContainsString('vendor', $stdout);
     }
 
     /**
@@ -211,6 +313,54 @@ final class OrbitronMcpBinaryTest extends TestCase
         fclose($pipes[2]);
 
         return [$stdout, $stderr, proc_close($process)];
+    }
+
+    /**
+     * The generated Composer inventory the launched server reads, built
+     * from the set this suite itself runs against.
+     *
+     * The server reads the consumer project's own
+     * `vendor/composer/installed.php`, so the fixture needs one. Every
+     * name, version and install root below is copied from the vendor tree
+     * this suite runs against — with each root resolved to an absolute
+     * path, because the generated file's own roots are written relative
+     * to the directory it sits in.
+     *
+     * A name that is only replaced or provided carries neither field,
+     * which is how Composer generates it and what the reader requires.
+     */
+    private function writeInventory(): void
+    {
+        $versions = [];
+
+        foreach (InstalledVersions::getInstalledPackages() as $name) {
+            $path = InstalledVersions::getInstallPath($name);
+            $resolved = $path === null ? false : realpath($path);
+            $version = InstalledVersions::getPrettyVersion($name);
+
+            $entry = ['dev_requirement' => false];
+
+            if ($version !== null) {
+                $entry['pretty_version'] = $version;
+            }
+
+            if ($resolved !== false) {
+                $entry['install_path'] = $resolved;
+            }
+
+            $versions[$name] = $entry;
+        }
+
+        $directory = $this->project->path('vendor/composer');
+
+        if (!mkdir($directory, 0o700, true)) {
+            throw new RuntimeException("Could not create {$directory}.");
+        }
+
+        file_put_contents($directory . '/installed.php', '<?php return ' . var_export([
+            'root' => InstalledVersions::getRootPackage(),
+            'versions' => $versions,
+        ], true) . ';');
     }
 
     /**

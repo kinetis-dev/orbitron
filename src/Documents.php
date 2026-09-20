@@ -13,11 +13,11 @@ namespace Kinetis\Orbitron;
  * output, so the two surfaces cannot drift apart.
  *
  * Nothing is memoized. Every call re-reads the bounded project inputs it
- * needs and keeps no plan, file content or diagnostic afterwards.
- * Composer's installed-package inventory is the one exception, and not
- * this class's to refresh: `Composer\InstalledVersions` is
- * process-cached, so a persistent MCP process reports the dependencies it
- * started with until it is restarted.
+ * needs and keeps no plan, file content or diagnostic afterwards. The
+ * installed-package inventory is the snapshot this object was handed and
+ * never refreshed here: a command constructs one per invocation, and the
+ * MCP server constructs one per operation, so neither surface reports a
+ * set older than the call.
  */
 final readonly class Documents
 {
