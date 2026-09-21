@@ -27,7 +27,7 @@ use SplFileInfo;
  * loads `vendor/composer/installed.php` itself. That file, the project's
  * own `composer.json`, and the admitted files beneath the install roots
  * Composer names — `composer.json`, `README.md` and what lies under
- * `src/`, `bin/` or `resources/` in an installed `kinetis/*` package —
+ * `src/`, `bin/` or `resources/` in a real installed, non-root package —
  * are the whole file-read set the documented boundary admits to.
  * `Kinetis\McpDocs\DocsApplication`, which the MCP server composes,
  * fetches a documentation page over HTTPS from its own fixed origin

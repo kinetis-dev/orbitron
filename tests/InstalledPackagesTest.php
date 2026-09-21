@@ -53,7 +53,16 @@ final class InstalledPackagesTest extends TestCase
         );
     }
 
-    public function test_it_drops_every_package_outside_the_kinetis_vendor(): void
+    /**
+     * The two questions this object answers separately, decided from one
+     * record set. The reported inventory is the harness's own, so a
+     * package outside the `kinetis/` vendor is not a record. Its
+     * installed source is still the authority for its own behavior, so
+     * the same package keeps a source root: the exact dependency a
+     * Kinetis behavior turns on is readable without being reported as
+     * something Kinetis ships.
+     */
+    public function test_a_package_outside_the_kinetis_vendor_keeps_a_source_but_not_a_record(): void
     {
         $packages = new InstalledPackages([
             new PackageFact('kinetis/framework', '1.11.2', '/app/vendor/kinetis/framework'),
@@ -63,6 +72,15 @@ final class InstalledPackagesTest extends TestCase
         ]);
 
         self::assertSame([['name' => 'kinetis/framework', 'version' => '1.11.2']], $packages->records());
+        self::assertSame(['version' => '3.0.2', 'root' => '/app/vendor/psr/log'], $packages->source('psr/log'));
+        self::assertSame(
+            ['version' => '1.0.9', 'root' => '/app/vendor/revolt/event-loop'],
+            $packages->source('revolt/event-loop'),
+        );
+        self::assertSame(
+            ['version' => '9.9.9', 'root' => '/app/vendor/kinetisx/not-ours'],
+            $packages->source('kinetisx/not-ours'),
+        );
     }
 
     /**
@@ -178,28 +196,51 @@ final class InstalledPackagesTest extends TestCase
 
     /**
      * The one lookup that hands out an install path, and the exact set
-     * of names it answers for: a real installed dependency, and nothing
-     * else — not the root project, not a name that is only replaced or
-     * provided, not another vendor's package, and not a name that was
-     * never installed.
+     * of names it answers for: a real installed dependency of any
+     * vendor, and nothing else — not the root project, whatever vendor
+     * that project belongs to, not a name that is only replaced or
+     * provided, not a metapackage, and not a name that was never
+     * installed.
+     *
+     * The root case is the one this breadth could lose. A project
+     * developed under its own vendor is still the checkout being
+     * written, not something it installed, so admitting every vendor
+     * must not turn the application itself into a readable package.
      */
-    public function test_only_a_real_installed_non_root_kinetis_package_has_a_readable_source(): void
+    public function test_only_a_real_installed_non_root_package_has_a_readable_source(): void
     {
         $packages = new InstalledPackages([
-            new PackageFact('kinetis/skeleton', '1.3.0', '/app', root: true),
+            new PackageFact('acme/shop', '1.3.0', '/app', root: true),
             new PackageFact('kinetis/framework', '1.11.2', '/app/vendor/kinetis/framework'),
             new PackageFact('kinetis/replaced-by-framework', null, null),
-            new PackageFact('psr/log', '3.0.2', '/app/vendor/psr/log'),
+            new PackageFact('thesis/amqp', '0.9.1', '/app/vendor/thesis/amqp'),
+            new PackageFact('psr/container-implementation', null, null),
+            new PackageFact('symfony/polyfill', '1.31.0', null),
         ]);
 
         self::assertSame(
             ['version' => '1.11.2', 'root' => '/app/vendor/kinetis/framework'],
             $packages->source('kinetis/framework'),
         );
+        self::assertSame(
+            ['version' => '0.9.1', 'root' => '/app/vendor/thesis/amqp'],
+            $packages->source('thesis/amqp'),
+        );
 
-        foreach (['kinetis/skeleton', 'kinetis/replaced-by-framework', 'psr/log', 'kinetis/absent'] as $name) {
+        $excluded = [
+            'acme/shop',
+            'kinetis/replaced-by-framework',
+            'psr/container-implementation',
+            'symfony/polyfill',
+            'kinetis/absent',
+            'thesis/absent',
+        ];
+
+        foreach ($excluded as $name) {
             self::assertNull($packages->source($name), $name);
         }
+
+        self::assertSame([['name' => 'kinetis/framework', 'version' => '1.11.2']], $packages->records());
     }
 
     /**
@@ -241,8 +282,10 @@ final class InstalledPackagesTest extends TestCase
      * while staying out of the records and out of the source lookup, a
      * replaced-only entry carries neither field — which the entry shape
      * admits, rather than refusing the read around it — and is dropped, a
-     * non-`kinetis/*` package is dropped, and a real dependency's install
-     * root reaches the lookup the source reader answers from.
+     * non-`kinetis/*` package stays out of the records while keeping the
+     * install root that makes its source readable, and a real
+     * dependency's install root reaches the lookup the source reader
+     * answers from.
      */
     public function test_it_reads_a_projects_generated_inventory(): void
     {
@@ -264,6 +307,10 @@ final class InstalledPackagesTest extends TestCase
         self::assertSame(
             ['version' => '1.12.2', 'root' => '/app/vendor/kinetis/framework'],
             $packages->source('kinetis/framework'),
+        );
+        self::assertSame(
+            ['version' => '3.0.2', 'root' => '/app/vendor/psr/log'],
+            $packages->source('psr/log'),
         );
         self::assertNull($packages->source('kinetis/orbitron'));
         self::assertNull($packages->source('kinetis/replaced'));

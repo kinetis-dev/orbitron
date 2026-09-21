@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Kinetis\Orbitron\Tests;
 
+use Kinetis\McpDocs\DocsApplication;
 use Kinetis\Orbitron\Context;
 use Kinetis\Orbitron\InstalledPackages;
 use Kinetis\Orbitron\PackageFact;
@@ -116,12 +117,12 @@ final class ContextTest extends TestCase
     }
 
     /**
-     * The two installed-source tools are named and their argument-taking
-     * contract is stated in both the tool entries and the server-level
-     * claim: the document must not say every tool is argument-free once
-     * two are not.
+     * The three installed-source tools are named and their
+     * argument-taking contract is stated in both the tool entries and
+     * the server-level claim: the document must not say every tool is
+     * argument-free once three are not.
      */
-    public function test_the_mcp_tools_include_the_installed_source_reader_and_search(): void
+    public function test_the_mcp_tools_include_the_installed_source_reader_search_and_listing(): void
     {
         $document = self::context()->toArray();
 
@@ -133,6 +134,8 @@ final class ContextTest extends TestCase
                 'orbitron_scaffold_apply',
                 'orbitron_read_package_source',
                 'orbitron_search_package_source',
+                'orbitron_list_package_source',
+                DocsApplication::READ_TOOL,
             ],
             array_column($document['mcp']['tools'], 'name'),
         );
@@ -158,10 +161,51 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('last reported line plus one', $searchTool);
         self::assertStringNotContainsString('nextStartLine', $searchTool);
 
+        $listTool = $effects['orbitron_list_package_source'];
+
+        self::assertStringContainsString('entries', $listTool);
+        self::assertStringContainsString('directory', $listTool);
+        self::assertStringContainsString('source_not_directory', $listTool);
+        self::assertStringContainsString('directory_oversize', $listTool);
+        // The shape a caller must not expect of it: one directory, and
+        // no way to ask for the rest of a refused one.
+        self::assertStringContainsString('no recursion', $listTool);
+        self::assertStringNotContainsString('cursor', $listTool);
+
         self::assertStringContainsString('Four tools take no argument', $document['server']);
         self::assertStringContainsString('orbitron_read_package_source', $document['server']);
         self::assertStringContainsString('orbitron_search_package_source', $document['server']);
+        self::assertStringContainsString('orbitron_list_package_source', $document['server']);
         self::assertStringNotContainsString('every tool takes no arguments', $document['server']);
+    }
+
+    /**
+     * The documentation window is stated as what it is: a page read with
+     * its own continuation rule and refusal codes, owned by
+     * kinetis/mcp-docs, and the one tool that leaves this machine. The
+     * document must not go on claiming that only a resource read does.
+     */
+    public function test_the_mcp_tools_include_the_documentation_window(): void
+    {
+        $document = self::context()->toArray();
+        $effects = array_column($document['mcp']['tools'], 'effect', 'name');
+        $window = $effects[DocsApplication::READ_TOOL];
+
+        self::assertStringContainsString('uri', $window);
+        self::assertStringContainsString('startLine', $window);
+        self::assertStringContainsString('lineCount', $window);
+        self::assertStringContainsString('endLine + 1', $window);
+        self::assertStringContainsString('resource_unknown', $window);
+        self::assertStringContainsString('line_out_of_range', $window);
+        self::assertStringContainsString('kinetis/mcp-docs', $window);
+
+        $limits = implode("\n", $document['harness']['limits']);
+
+        self::assertStringContainsString(DocsApplication::READ_TOOL, $limits);
+        self::assertStringNotContainsString(
+            'Reading a `kinetis://docs/*` resource is the one operation',
+            $limits,
+        );
     }
 
     public function test_it_links_to_the_authoritative_kinetis_guides(): void
@@ -199,6 +243,15 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('shared database, broker or object store one at a time', $workflow);
         self::assertStringContainsString('never two overlapping runs against the same state', $workflow);
         self::assertStringContainsString('reports failures the code does not have', $workflow);
+    }
+
+    public function test_the_workflow_bounds_installed_source_reading_to_material_facts(): void
+    {
+        $workflow = implode("\n", self::context()->toArray()['workflow']);
+
+        self::assertStringContainsString('exact version-sensitive facts that materially govern the change', $workflow);
+        self::assertStringContainsString('return to the application', $workflow);
+        self::assertStringContainsString('instead of inventorying unrelated package source', $workflow);
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Kinetis\Orbitron\Tests;
 
 use Composer\InstalledVersions;
 use JsonException;
+use Kinetis\McpDocs\DocsApplication;
 use Kinetis\McpDocs\DocsCatalogue;
 use Kinetis\Orbitron\HealthScaffold;
 use Kinetis\Orbitron\Mcp\OrbitronMcpApplication;
@@ -88,6 +89,8 @@ final class OrbitronMcpBinaryTest extends TestCase
                 'orbitron_scaffold_apply',
                 OrbitronMcpApplication::SOURCE_TOOL,
                 OrbitronMcpApplication::SEARCH_TOOL,
+                OrbitronMcpApplication::LIST_TOOL,
+                DocsApplication::READ_TOOL,
             ],
             array_column($frames[1]['result']['tools'], 'name'),
         );

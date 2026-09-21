@@ -48,6 +48,8 @@ final class OrbitronMcpApplicationTest extends TestCase
         'orbitron_scaffold_apply',
         OrbitronMcpApplication::SOURCE_TOOL,
         OrbitronMcpApplication::SEARCH_TOOL,
+        OrbitronMcpApplication::LIST_TOOL,
+        DocsApplication::READ_TOOL,
     ];
 
     /** The one package the fixture project installs beyond Orbitron and the framework. */
@@ -164,6 +166,54 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
+     * The listing tool publishes the narrowest schema of the three: the
+     * package and the path, and no member that could turn one directory
+     * into a recursive walk, a filter or a page.
+     */
+    public function test_the_listing_tool_publishes_a_closed_schema_of_a_package_and_a_path(): void
+    {
+        $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
+        $schema = $tools[6]['inputSchema'];
+
+        self::assertSame(OrbitronMcpApplication::LIST_TOOL, $tools[6]['name']);
+        self::assertSame(['package', 'path'], $schema['required']);
+        self::assertFalse($schema['additionalProperties']);
+        self::assertSame(['package', 'path'], array_keys($schema['properties']));
+        self::assertSame(1, $schema['properties']['package']['minLength']);
+        self::assertSame(1, $schema['properties']['path']['minLength']);
+        self::assertSame(256, $schema['properties']['path']['maxLength']);
+        self::assertStringContainsString('200', $tools[6]['description']);
+    }
+
+    /**
+     * The three installed-source tools accept any real installed
+     * dependency, so their published text has to say where a name that
+     * is not `kinetis/*` comes from. `orbitron_inspect` reports the
+     * `kinetis/*` inventory and nothing else: a description sending an
+     * agent there for every accepted name would name a discovery path
+     * that cannot produce one, and a description still restricting the
+     * tool to `kinetis/*` would hide the access entirely. Kinetis stays
+     * first in the text; `composer.lock` is what carries the rest.
+     */
+    public function test_the_installed_source_tools_route_third_party_names_to_composer_lock(): void
+    {
+        $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
+
+        foreach ([4, 5, 6] as $index) {
+            $name = $tools[$index]['name'];
+            $package = $tools[$index]['inputSchema']['properties']['package']['description'];
+
+            self::assertStringContainsString('composer.lock', $package, $name);
+            self::assertStringContainsString('kinetis/*', $package, $name);
+            self::assertStringNotContainsString(
+                'one installed kinetis/* package',
+                $tools[$index]['description'],
+                $name,
+            );
+        }
+    }
+
+    /**
      * `properties` must reach the wire as an object. Decoded
      * associatively it is the same PHP value an empty list would be, so
      * only the frame itself can show which one was sent.
@@ -177,7 +227,7 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The three reading tools say so, and the one that writes says that —
+     * Every reading tool says so, and the one that writes says that —
      * without claiming an idempotence a second apply does not have.
      */
     public function test_the_annotations_name_exactly_one_mutating_tool(): void
@@ -191,6 +241,7 @@ final class OrbitronMcpApplicationTest extends TestCase
             'orbitron_scaffold_plan',
             self::TOOLS[4],
             self::TOOLS[5],
+            self::TOOLS[6],
         ];
 
         foreach ($reading as $name) {
@@ -208,6 +259,15 @@ final class OrbitronMcpApplicationTest extends TestCase
             'idempotentHint' => false,
             'openWorldHint' => false,
         ], $annotations['orbitron_scaffold_apply']);
+
+        // The one tool that reaches the network, and the only one whose
+        // annotations this package does not author.
+        self::assertSame([
+            'readOnlyHint' => true,
+            'destructiveHint' => false,
+            'idempotentHint' => true,
+            'openWorldHint' => true,
+        ], $annotations[DocsApplication::READ_TOOL]);
     }
 
     public function test_the_context_resource_is_the_markdown_document_the_command_prints(): void
@@ -327,6 +387,84 @@ final class OrbitronMcpApplicationTest extends TestCase
 
         self::assertStringContainsString(DocsCatalogue::SOURCE_BASE_URL . 'index.md', $diagnostic);
         self::assertStringContainsString('expected status 200, got 503', $diagnostic);
+    }
+
+    /**
+     * The documentation window reaches the wire exactly as
+     * kinetis/mcp-docs authors it. Nothing about the tool — its name,
+     * what it tells a model, or the schema a client validates against —
+     * is restated in this package, so a client cannot be given two
+     * accounts of one tool.
+     */
+    public function test_the_documentation_window_tool_is_published_as_the_documentation_server_authors_it(): void
+    {
+        $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
+        $published = $tools[7];
+        $authored = DocsApplication::readTool();
+
+        self::assertSame($authored->name, $published['name']);
+        self::assertSame($authored->description, $published['description']);
+        self::assertSame($authored->inputSchema, $published['inputSchema']);
+    }
+
+    /**
+     * A window call is handed to the composed documentation server
+     * whole: the catalogue it resolves the URI against, the URL it
+     * fetches and the document it returns are all that package's own.
+     */
+    public function test_a_documentation_window_call_is_delegated_and_returns_the_fetched_window(): void
+    {
+        $this->responses = [new MockResponse("first\nsecond\nthird\n")];
+
+        $document = $this->call(
+            '{"uri":"kinetis://docs/appendix","startLine":2,"lineCount":1}',
+            DocsApplication::READ_TOOL,
+        );
+
+        self::assertSame([
+            'status' => 'ok',
+            'uri' => 'kinetis://docs/appendix',
+            'startLine' => 2,
+            'endLine' => 2,
+            'hasMore' => true,
+            'content' => "second\n",
+        ], $document);
+        self::assertSame([['GET', DocsCatalogue::SOURCE_BASE_URL . 'appendix.md']], $this->requests);
+    }
+
+    /**
+     * The refusal vocabulary is the documentation server's too, and
+     * reaches the client as a tool that ran and refused rather than a
+     * transport error. Nothing is fetched for a URI outside the
+     * catalogue.
+     */
+    public function test_a_documentation_window_refusal_is_the_documentation_servers_own_document(): void
+    {
+        $frame = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . DocsApplication::READ_TOOL
+            . '","arguments":{"uri":"kinetis://docs/not-a-page"}}}',
+        ])[0];
+
+        self::assertTrue($frame['result']['isError']);
+        self::assertSame(['status' => 'error', 'code' => 'resource_unknown'], self::document($frame));
+        self::assertSame([], $this->requests);
+    }
+
+    /**
+     * The window's arguments are validated by the package that publishes
+     * its schema, not re-read here: an argument outside that schema is
+     * `-32602` and nothing is fetched.
+     */
+    public function test_a_documentation_window_argument_outside_the_schema_is_refused_before_any_fetch(): void
+    {
+        $frame = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . DocsApplication::READ_TOOL
+            . '","arguments":{"uri":"kinetis://docs/index","ref":"main"}}}',
+        ])[0];
+
+        self::assertSame(-32602, $frame['error']['code']);
+        self::assertStringContainsString('"ref"', $frame['error']['message']);
+        self::assertSame([], $this->requests);
     }
 
     public function test_inspect_and_verify_return_the_documents_the_commands_write(): void
@@ -934,6 +1072,126 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
+     * The listing a client reads: the names and kinds of that one
+     * directory's own children, the installed version beside them, and
+     * no path anywhere in the frame.
+     *
+     * @throws JsonException
+     */
+    public function test_a_source_listing_returns_the_children_of_the_installed_directory(): void
+    {
+        file_put_contents($this->project->path('src/Http/Controller.php'), "one\n");
+        file_put_contents($this->project->path('src/Http/Responder.php'), "two\n");
+        self::assertTrue(mkdir($this->project->path('src/Http/Responses'), 0o700));
+        file_put_contents($this->project->path('src/Http/Responses/Json.php'), "three\n");
+
+        $frame = $this->rawFrames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::LIST_TOOL
+            . '","arguments":{"package":"' . self::PACKAGE . '","path":"src/Http"}}}',
+        ])[0];
+
+        $result = json_decode($frame, associative: true, flags: JSON_THROW_ON_ERROR)['result'];
+
+        self::assertFalse($result['isError']);
+        self::assertSame([
+            'status' => 'ok',
+            'package' => self::PACKAGE,
+            'version' => '3.1.4',
+            'path' => 'src/Http',
+            'entries' => [
+                ['name' => 'Controller.php', 'type' => 'file'],
+                ['name' => 'Responder.php', 'type' => 'file'],
+                ['name' => 'Responses', 'type' => 'directory'],
+            ],
+        ], json_decode($result['content'][0]['text'], true, flags: JSON_THROW_ON_ERROR));
+
+        self::assertStringNotContainsString($this->project->root, $frame);
+    }
+
+    /**
+     * A listing refusal is a tool that ran and concluded, like every
+     * other: an MCP error result carrying the code and nothing else.
+     *
+     * @throws JsonException
+     */
+    public function test_a_refused_listing_is_an_error_result_carrying_only_the_code(): void
+    {
+        file_put_contents($this->project->path('src/Http/Controller.php'), "one\n");
+
+        $frame = $this->rawFrames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::LIST_TOOL
+            . '","arguments":{"package":"' . self::PACKAGE . '","path":"src/Http/Controller.php"}}}',
+        ])[0];
+
+        $result = json_decode($frame, associative: true, flags: JSON_THROW_ON_ERROR)['result'];
+
+        self::assertTrue($result['isError']);
+        self::assertSame(
+            ['status' => 'error', 'code' => 'source_not_directory'],
+            json_decode($result['content'][0]['text'], true, flags: JSON_THROW_ON_ERROR),
+        );
+        self::assertStringNotContainsString($this->project->root, $frame);
+    }
+
+    /**
+     * The package root and its two readable files are not listable, so
+     * the one tool that names a directory cannot be pointed at one.
+     *
+     * @throws JsonException
+     */
+    public function test_a_root_file_is_not_listable(): void
+    {
+        $document = $this->call(
+            '{"package":"' . self::PACKAGE . '","path":"composer.json"}',
+            OrbitronMcpApplication::LIST_TOOL,
+        );
+
+        self::assertSame(['status' => 'error', 'code' => 'path_not_admitted'], $document);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function invalidListArgumentsProvider(): iterable
+    {
+        yield 'no arguments at all' => ['{}'];
+        yield 'package missing' => ['{"path":"src"}'];
+        yield 'path missing' => ['{"package":"kinetis/fixture"}'];
+        yield 'package empty' => ['{"package":"","path":"src"}'];
+        yield 'path empty' => ['{"package":"kinetis/fixture","path":""}'];
+        yield 'path not a string' => ['{"package":"kinetis/fixture","path":["src"]}'];
+        yield 'path too long' => ['{"package":"kinetis/fixture","path":"src/' . str_repeat('a', 253) . '"}'];
+
+        // The members the other two tools take, and the ones a listing
+        // would need to become a walk: this schema names none of them.
+        yield 'the window tool\'s startLine' => ['{"package":"kinetis/fixture","path":"src","startLine":1}'];
+        yield 'the window tool\'s lineCount' => ['{"package":"kinetis/fixture","path":"src","lineCount":10}'];
+        yield 'the search tool\'s query' => ['{"package":"kinetis/fixture","path":"src","query":"final"}'];
+        yield 'a recursion flag' => ['{"package":"kinetis/fixture","path":"src","recursive":true}'];
+        yield 'a depth' => ['{"package":"kinetis/fixture","path":"src","depth":2}'];
+        yield 'a glob' => ['{"package":"kinetis/fixture","path":"src","pattern":"*.php"}'];
+        yield 'a result limit' => ['{"package":"kinetis/fixture","path":"src","limit":10}'];
+    }
+
+    /**
+     * The listing schema is enforced here as fully as the other two, so
+     * a client that ignored it still cannot reach the reader with a
+     * member the published schema has no reading of — least of all one
+     * that would widen a directory into a tree.
+     */
+    #[DataProvider('invalidListArgumentsProvider')]
+    public function test_listing_arguments_outside_the_schema_are_invalid_params(string $arguments): void
+    {
+        $frame = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::LIST_TOOL
+            . '","arguments":' . $arguments . '}}',
+        ])[0];
+
+        self::assertSame(-32602, $frame['error']['code']);
+        self::assertArrayNotHasKey('result', $frame);
+    }
+
+    /**
      * @return iterable<string, array{string}>
      */
     public static function documentToolProvider(): iterable
@@ -944,8 +1202,8 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The two tools that take arguments must not have loosened the other
-     * four: each of them still refuses any argument at all.
+     * The three tools that take arguments must not have loosened the
+     * other four: each of them still refuses any argument at all.
      */
     #[DataProvider('documentToolProvider')]
     public function test_the_document_tools_still_take_no_arguments(string $name): void

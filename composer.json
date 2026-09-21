@@ -1,6 +1,6 @@
 {
     "name": "kinetis/orbitron",
-    "description": "A development-only application construction harness for Kinetis: a CLI and a standalone MCP server that hand any coding agent a portable Kinetis context document, the Kinetis documentation pages as MCP resources, the installed kinetis/* package inventory, a bounded live read of one installed kinetis/* package's own source and a literal search inside one such file (MCP only), a deterministic verification of the project's Composer layout, and one previewable health-endpoint scaffold, with no model of its own.",
+    "description": "A development-only application construction harness for Kinetis: a CLI and a standalone MCP server that hand any coding agent a portable Kinetis context document, the Kinetis documentation pages as MCP resources and as bounded line windows, the installed kinetis/* package inventory, a bounded live read of one installed package's own source, a literal search inside one such file and a listing of one directory of such a package (MCP only), a deterministic verification of the project's Composer layout, and one previewable health-endpoint scaffold, with no model of its own.",
     "type": "library",
     "license": "MIT",
     "authors": [

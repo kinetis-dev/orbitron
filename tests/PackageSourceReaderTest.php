@@ -14,10 +14,11 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 /**
- * The installed-source window and the literal search over the same
- * files, against a real package directory: the bytes a window carries,
- * the lines a search reports, and every refusal, decided from files on
- * disk rather than from a mocked filesystem.
+ * The installed-source window, the literal search over the same files
+ * and the directory listing that finds them, against a real package
+ * directory: the bytes a window carries, the lines a search reports,
+ * the children a listing names, and every refusal, decided from files
+ * on disk rather than from a mocked filesystem.
  *
  * The package under test here is a fixture named like an installed one,
  * so what is proved is the reader's own rules — not whatever happens to
@@ -48,7 +49,9 @@ final class PackageSourceReaderTest extends TestCase
     /** Removes the fixture without following a link out of it. */
     private static function delete(string $path): void
     {
-        if (is_link($path) || is_file($path)) {
+        // Anything that is not a directory is unlinked, a link to one
+        // and a special file included; only a real directory is walked.
+        if (is_link($path) || !is_dir($path)) {
             unlink($path);
 
             return;
@@ -179,6 +182,32 @@ final class PackageSourceReaderTest extends TestCase
     }
 
     /**
+     * The vendor a package belongs to is not what admits it, and it
+     * decides nothing else either. An exact installed dependency
+     * outside `kinetis/` — the source a Kinetis behavior can turn on —
+     * is read under the same five locations, refused outside them, and
+     * reported in the same shape.
+     */
+    public function test_a_package_outside_the_kinetis_vendor_is_read_under_the_same_locations(): void
+    {
+        $this->write('src/A.php', "one\n");
+        $this->write('tests/ATest.php', "two\n");
+
+        $reader = new PackageSourceReader(new InstalledPackages([
+            new PackageFact('thesis/amqp', '0.9.1', $this->root),
+        ]));
+
+        $document = $reader->read('thesis/amqp', 'src/A.php', 1, 200);
+
+        self::assertFalse($document->failed);
+        self::assertSame('thesis/amqp', $document->body['package']);
+        self::assertSame('0.9.1', $document->body['version']);
+        self::assertSame("one\n", $document->body['content']);
+
+        self::assertRefusal('path_not_admitted', $reader->read('thesis/amqp', 'tests/ATest.php', 1, 200));
+    }
+
+    /**
      * The Composer root project is the checkout being developed, not an
      * installed package, so its source is not readable through this
      * tool either.
@@ -212,7 +241,6 @@ final class PackageSourceReaderTest extends TestCase
         yield 'unadmitted root file' => ['phpunit.xml'];
         yield 'unadmitted directory' => ['tests/ATest.php'];
         yield 'directory prefix only' => ['srcx/A.php'];
-        yield 'bare admitted directory' => ['src'];
     }
 
     #[DataProvider('inadmissiblePathProvider')]
@@ -235,11 +263,19 @@ final class PackageSourceReaderTest extends TestCase
         self::assertRefusal('source_missing', $reader->read(self::PACKAGE, 'composer.json', 1, 200));
     }
 
+    /**
+     * A directory is an admitted location for the listing, so a read of
+     * one reaches the regular-file check rather than being turned away
+     * as an unadmitted path: the refusal says the target is not a file,
+     * which is what it is.
+     */
     public function test_a_directory_is_not_a_readable_source_file(): void
     {
         $this->write('src/Http/Controller.php', "body\n");
 
         self::assertRefusal('source_unreadable', $this->read('src/Http', 1, 200));
+        self::assertRefusal('source_unreadable', $this->read('src', 1, 200));
+        self::assertRefusal('source_unreadable', $this->search('src', 'body', 1));
     }
 
     /**
@@ -679,6 +715,292 @@ final class PackageSourceReaderTest extends TestCase
         self::assertStringNotContainsString('secret body', $escaped->toJson());
     }
 
+    /**
+     * The listing is the directory as it is: its direct children only,
+     * each with the kind that decides the caller's next call, in one
+     * order — bytewise by name, which is neither the filesystem's own
+     * nor a locale's.
+     *
+     * @throws JsonException
+     */
+    public function test_a_listing_reports_the_direct_children_in_bytewise_name_order(): void
+    {
+        $this->write('src/Zeta.php', "one\n");
+        $this->write('src/alpha.php', "two\n");
+        $this->write('src/Http/Controller.php', "three\n");
+        $this->write('src/Http/Nested/Deep.php', "four\n");
+
+        $document = $this->listing('src');
+
+        self::assertFalse($document->failed);
+        self::assertSame(['status', 'package', 'version', 'path', 'entries'], array_keys($document->body));
+        self::assertSame([
+            'status' => 'ok',
+            'package' => self::PACKAGE,
+            'version' => '2.4.0',
+            'path' => 'src',
+            'entries' => [
+                // Uppercase sorts before lowercase, which is the whole
+                // difference between a bytewise order and a friendly
+                // one, and the descendants below Http are not here.
+                ['name' => 'Http', 'type' => 'directory'],
+                ['name' => 'Zeta.php', 'type' => 'file'],
+                ['name' => 'alpha.php', 'type' => 'file'],
+            ],
+        ], $document->body);
+    }
+
+    /**
+     * The order is this tool's own rather than the one the directory
+     * stores: a larger set, created in the reverse of the order it must
+     * come back in, still comes back bytewise by name.
+     */
+    public function test_the_reported_order_is_not_the_order_the_directory_stores(): void
+    {
+        $names = [];
+
+        for ($index = 60; $index >= 1; $index--) {
+            $names[] = sprintf('A%02d.php', $index);
+            $this->write('src/' . $names[count($names) - 1], "body\n");
+        }
+
+        sort($names, SORT_STRING);
+
+        self::assertSame($names, array_column($this->listing('src')->body['entries'], 'name'));
+    }
+
+    /** A directory beneath an admitted one is listed by naming it; nothing descends on its own. */
+    public function test_a_nested_directory_is_listed_by_naming_it(): void
+    {
+        $this->write('src/Http/Controller.php', "one\n");
+        $this->write('src/Http/Nested/Deep.php', "two\n");
+
+        self::assertSame(
+            [
+                ['name' => 'Controller.php', 'type' => 'file'],
+                ['name' => 'Nested', 'type' => 'directory'],
+            ],
+            $this->listing('src/Http')->body['entries'],
+        );
+    }
+
+    /**
+     * An empty directory is an answer — the directory has nothing in it
+     * — not a refusal that leaves a caller guessing which it was.
+     */
+    public function test_an_empty_directory_is_a_successful_empty_listing(): void
+    {
+        $document = $this->listing('src');
+
+        self::assertFalse($document->failed);
+        self::assertSame([], $document->body['entries']);
+    }
+
+    /**
+     * The three directories, each listable by its bare name.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function listableDirectoryProvider(): iterable
+    {
+        yield 'source' => ['src'];
+        yield 'binaries' => ['bin'];
+        yield 'resources' => ['resources'];
+    }
+
+    #[DataProvider('listableDirectoryProvider')]
+    public function test_every_listable_location_is_reached_by_its_bare_name(string $path): void
+    {
+        $this->write($path . '/A.php', "body\n");
+
+        self::assertSame([['name' => 'A.php', 'type' => 'file']], $this->listing($path)->body['entries']);
+    }
+
+    /**
+     * A listing names a directory this tool serves. The package root and
+     * the two readable root files are not listable, and neither is any
+     * location outside the three directories — however readable a file
+     * under one of them happens to be.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function unlistablePathProvider(): iterable
+    {
+        yield 'package manifest' => ['composer.json'];
+        yield 'readme' => ['README.md'];
+        yield 'package root' => ['.'];
+        yield 'empty' => [''];
+        yield 'absolute' => ['/etc'];
+        yield 'trailing separator' => ['src/'];
+        yield 'parent segment' => ['src/../..'];
+        yield 'unadmitted directory' => ['tests'];
+        yield 'unadmitted nested directory' => ['tests/Http'];
+        yield 'directory prefix only' => ['srcx'];
+        yield 'backslash separator' => ['src\\Http'];
+        yield 'NUL byte' => ["src\0"];
+    }
+
+    #[DataProvider('unlistablePathProvider')]
+    public function test_a_path_outside_the_listable_locations_is_refused(string $path): void
+    {
+        $this->write('composer.json', "{}\n");
+        $this->write('README.md', "body\n");
+        $this->write('tests/Http/ATest.php', "body\n");
+
+        self::assertRefusal('path_not_admitted', $this->listing($path));
+    }
+
+    public function test_an_uninstalled_package_is_refused_before_a_directory_is_opened(): void
+    {
+        self::assertRefusal('package_unknown', $this->reader()->list('kinetis/absent', 'src'));
+    }
+
+    public function test_an_admitted_directory_that_is_not_there_is_missing(): void
+    {
+        self::assertRefusal('source_missing', $this->listing('src/Absent'));
+    }
+
+    /**
+     * An admitted path behind a regular file named the wrong kind of
+     * thing, which is a different answer from naming something this
+     * tool does not serve.
+     */
+    public function test_an_admitted_path_behind_a_regular_file_is_not_a_directory(): void
+    {
+        $this->write('src/A.php', "body\n");
+
+        self::assertRefusal('source_not_directory', $this->listing('src/A.php'));
+    }
+
+    /**
+     * A listing offers only what a read of the same name could reach:
+     * every child is resolved and re-admitted first, so a link out of
+     * the package, a link into a location this tool does not serve, a
+     * dangling one and a special file are absent rather than named. A
+     * link that stays inside is an ordinary entry, reported as what it
+     * resolves to and usable through that same name.
+     */
+    public function test_only_children_resolving_inside_the_same_location_are_listed(): void
+    {
+        $outside = sys_get_temp_dir() . '/orbitron-outside-' . bin2hex(random_bytes(8));
+        file_put_contents($outside, "secret body\n");
+
+        $this->write('README.md', "secret body\n");
+        $this->write('src/Real.php', "real\n");
+        $this->write('src/Http/Controller.php', "nested\n");
+
+        $this->link('src/Inside.php', 'src/Real.php');
+        $this->link('src/Directory', 'src/Http');
+        $this->link('src/Readme.md', 'README.md');
+        symlink($outside, $this->root . '/src/Escape.php');
+        symlink($this->root . '/src/Gone.php', $this->root . '/src/Dangling.php');
+        self::assertTrue(posix_mkfifo($this->root . '/src/pipe', 0o600));
+
+        $document = $this->listing('src');
+
+        unlink($outside);
+
+        self::assertSame([
+            ['name' => 'Directory', 'type' => 'directory'],
+            ['name' => 'Http', 'type' => 'directory'],
+            ['name' => 'Inside.php', 'type' => 'file'],
+            ['name' => 'Real.php', 'type' => 'file'],
+        ], $document->body['entries']);
+
+        // What a listing named stays reachable through the same
+        // resolution policy that admitted it.
+        self::assertSame("real\n", $this->read('src/Inside.php', 1, 200)->body['content']);
+        self::assertSame(
+            [['name' => 'Controller.php', 'type' => 'file']],
+            $this->listing('src/Directory')->body['entries'],
+        );
+    }
+
+    /**
+     * A child whose name is not UTF-8 cannot be reported as JSON, and a
+     * listing silently missing one entry is not the directory it claims
+     * to be — so the whole call refuses, with the code an unreadable
+     * directory returns.
+     */
+    public function test_a_child_name_that_is_not_utf8_refuses_the_listing(): void
+    {
+        $this->write('src/A.php', "body\n");
+
+        if (@file_put_contents($this->root . "/src/\xC3\x28.php", "body\n") === false) {
+            self::markTestSkipped('This filesystem refuses a name that is not UTF-8.');
+        }
+
+        self::assertRefusal('source_unreadable', $this->listing('src'));
+    }
+
+    /**
+     * The ceiling counts what would be reported, so a directory at
+     * exactly the cap is a complete answer however many children it
+     * also holds that this tool does not serve.
+     */
+    public function test_exactly_the_admitted_count_is_a_complete_listing(): void
+    {
+        $this->fill(PackageSourceReader::MAX_ENTRY_COUNT);
+
+        $this->write('README.md', "secret body\n");
+        $this->link('src/Readme.md', 'README.md');
+        symlink($this->root . '/src/Gone.php', $this->root . '/src/Dangling.php');
+
+        $document = $this->listing('src');
+
+        self::assertFalse($document->failed);
+        self::assertCount(PackageSourceReader::MAX_ENTRY_COUNT, $document->body['entries']);
+    }
+
+    /**
+     * One reportable child past the cap refuses the whole directory: a
+     * listing carrying the first 200 of 201 names would answer "what is
+     * in here" with something else, and there is no cursor to finish it
+     * with.
+     *
+     * @throws JsonException
+     */
+    public function test_one_child_past_the_admitted_count_refuses_without_a_partial_list(): void
+    {
+        $this->fill(PackageSourceReader::MAX_ENTRY_COUNT + 1);
+
+        $document = $this->listing('src');
+
+        self::assertRefusal('directory_oversize', $document);
+        self::assertStringNotContainsString('A001.php', $document->toJson());
+    }
+
+    /**
+     * Every listing refusal is the code alone, exactly as every read
+     * refusal is: no path, no root, and no name out of the directory the
+     * call stopped in.
+     *
+     * @throws JsonException
+     */
+    public function test_no_listing_refusal_carries_a_path_a_root_or_a_name(): void
+    {
+        $this->write('src/Http/secret body.php', "one\n");
+        $this->write('src/A.php', "one\n");
+
+        $refusals = [
+            'package_unknown' => $this->reader()->list('kinetis/absent', 'src'),
+            'path_not_admitted' => $this->listing('tests'),
+            'source_missing' => $this->listing('src/Absent'),
+            'source_not_directory' => $this->listing('src/A.php'),
+        ];
+
+        foreach ($refusals as $code => $document) {
+            self::assertRefusal((string) $code, $document);
+
+            $json = $document->toJson();
+
+            self::assertSame(['status', 'code'], array_keys($document->body));
+            self::assertStringNotContainsString($this->root, $json);
+            self::assertStringNotContainsString(sys_get_temp_dir(), $json);
+            self::assertStringNotContainsString('secret body', $json);
+        }
+    }
+
     private static function assertRefusal(string $code, Document $document): void
     {
         self::assertTrue($document->failed, "expected a refusal carrying {$code}");
@@ -693,6 +1015,19 @@ final class PackageSourceReaderTest extends TestCase
     private function search(string $path, string $query, int $startLine): Document
     {
         return $this->reader()->search(self::PACKAGE, $path, $query, $startLine);
+    }
+
+    private function listing(string $path): Document
+    {
+        return $this->reader()->list(self::PACKAGE, $path);
+    }
+
+    /** $count listable children of `src`, named so their order is plain. */
+    private function fill(int $count): void
+    {
+        for ($index = 1; $index <= $count; $index++) {
+            $this->write(sprintf('src/A%03d.php', $index), "body\n");
+        }
     }
 
     private function reader(): PackageSourceReader

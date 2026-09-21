@@ -8,8 +8,11 @@ use Composer\InstalledVersions;
 use RuntimeException;
 
 /**
- * The installed `kinetis/*` packages an Orbitron document reports, read
- * once per instance from the records handed to the constructor.
+ * One project's installed Composer packages, read once per instance
+ * from the records handed to the constructor: the `kinetis/*` ones an
+ * Orbitron document reports, and the install root of every real
+ * installed dependency, whatever its vendor, that the source reader may
+ * open.
  *
  * This is the seam the suite constructs directly: passing a list of
  * PackageFact objects exercises the same filtering, ordering and
@@ -64,9 +67,13 @@ final readonly class InstalledPackages
             // let such a name through as a package with a readable source,
             // which neither one has. `??=` keeps the first record for a
             // name, matching Composer's own first-match lookup.
-            if (!str_starts_with($fact->name, self::PREFIX)
-                || $fact->version === null
-                || $fact->installPath === null) {
+            //
+            // Vendor is not a condition of being retained. An exact
+            // installed dependency is the authority for its own behavior,
+            // so its install root has to reach {@see source()} whoever
+            // published it; the `kinetis/` rule is what {@see records()}
+            // reports, not what this object may open.
+            if ($fact->version === null || $fact->installPath === null) {
                 continue;
             }
 
@@ -216,8 +223,8 @@ final readonly class InstalledPackages
 
     /**
      * The version and install root of one real installed, non-root
-     * `kinetis/*` package, or null for every other name — including a
-     * name that is only replaced or provided, and the root project
+     * package, or null for every other name — including a name that is
+     * only replaced or provided, a metapackage, and the root project
      * itself.
      *
      * This is the only accessor that hands out an install path, and it
@@ -234,10 +241,15 @@ final readonly class InstalledPackages
     }
 
     /**
-     * The installed packages as the `{name, version}` records the
-     * context and inventory documents carry, in name order.
+     * The installed `kinetis/*` packages as the `{name, version}`
+     * records the context and inventory documents carry, in name order.
      *
-     * The Composer root project is left out: it is the project being
+     * This is the one Kinetis-only view. Orbitron reports the inventory
+     * it is the harness for, so another vendor's package is left out
+     * here even though its source stays readable through
+     * {@see source()}.
+     *
+     * The Composer root project is left out too: it is the project being
      * developed, not something this project installed, so reporting it
      * as a dependency at a version would be untrue. It is still retained
      * above, because {@see orbitronVersion()} needs it when Orbitron
@@ -251,7 +263,7 @@ final readonly class InstalledPackages
         $records = [];
 
         foreach ($this->versions as $name => $version) {
-            if (isset($this->roots[$name])) {
+            if (isset($this->roots[$name]) || !str_starts_with($name, self::PREFIX)) {
                 continue;
             }
 

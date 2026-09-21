@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Kinetis\Orbitron;
 
+use Kinetis\McpDocs\DocsApplication;
+
 /**
  * The Orbitron context document: what Orbitron is, what it does not do,
  * where the authoritative Kinetis guidance lives, the command workflow,
@@ -21,13 +23,13 @@ final readonly class Context
 
     /** @var list<string> */
     private const array LIMITS = [
-        'Orbitron ships no model and no shell; you supply the coding agent. Its MCP server exposes the same documents to an agent that speaks MCP, and adds one thing the commands do not have: the Kinetis documentation pages, as `kinetis://docs/*` resources served by kinetis/mcp-docs from inside the same connection.',
+        'Orbitron ships no model and no shell; you supply the coding agent. Its MCP server exposes the same documents to an agent that speaks MCP, and adds one thing the commands do not have: the Kinetis documentation pages, as `kinetis://docs/*` resources and as bounded line windows of one page, both served by kinetis/mcp-docs from inside the same connection.',
         'This document is reference material, not evidence. It does not establish that an application preserves request isolation, non-blocking I/O, or any other invariant — the guides below state the rules, and the project\'s own tests and review are what settle compliance.',
         'The package facts below describe what is installed in this project. They say nothing about the current state of Kinetis main. The documentation pages the MCP server serves are published from main and can describe behavior newer than these versions, so the versions below and the installed source are the authority for anything version-sensitive.',
         'Orbitron is a require-dev package. No production code depends on it, and removing it changes nothing an application does.',
         'Orbitron reads Composer\'s installed-package metadata and, for verification and scaffolding, the project\'s own `composer.json` through a bounded read — no other application source, no configuration and no credentials. The two files an applied scaffold creates are everything it writes.',
-        'Over MCP, Orbitron also reads one bounded line window of one installed, non-root `kinetis/*` package\'s own source, and searches one such file for a literal string: exact `composer.json`, exact `README.md`, or a file beneath `src/`, `bin/` or `resources/`, re-read live on every call. Both name one file; neither lists a directory or searches a package. It does not read the application\'s own source, tests, configuration, credentials, or any other installed package.',
-        'Reading a `kinetis://docs/*` resource is the one operation that leaves this machine. kinetis/mcp-docs fetches that page over HTTPS from one fixed origin, with TLS verified, no redirect followed, a 10-second idle timeout, a 30-second deadline and a 4 MiB response cap; a fetch that fails is a generic MCP error, with the URL and the reason written to the server\'s own diagnostic stream. No message chooses the origin, the ref or the page path, and the commands reach no network at all.',
+        'Over MCP, Orbitron also reads one bounded line window of one real installed, non-root package\'s own source, searches one such file for a literal string, and lists the direct children of one directory of such a package: exact `composer.json`, exact `README.md`, or a file beneath `src/`, `bin/` or `resources/` for the window and the search, and `src/`, `bin/` or `resources/` itself or a directory beneath one for the listing, all read live on every call. Any package this project really installed is reachable that way, not only `kinetis/*`, because an exact installed dependency is the authority for its own behavior; `orbitron_inspect` names the `kinetis/*` ones, and the project\'s own `composer.lock` names every other. The window and the search name one file, the listing one directory; none of the three descends into a subdirectory or searches a package. It does not read the application\'s own source, tests, configuration or credentials, and the Composer root project is not a readable package; anything in an installed package outside the locations named above, that package\'s own tests included, stays unreadable too.',
+        'Reading a documentation page — whole as a `kinetis://docs/*` resource, or one window of it with ' . DocsApplication::READ_TOOL . ' — is the one operation that leaves this machine. kinetis/mcp-docs fetches that page over HTTPS from one fixed origin, with TLS verified, no redirect followed, a 10-second idle timeout, a 30-second deadline and a 4 MiB response cap; a fetch that fails is a generic MCP error, with the URL and the reason written to the server\'s own diagnostic stream. No message chooses the origin, the ref or the page path, and the commands reach no network at all.',
         'The scaffold builds one fixed thing: `src/Http/HealthController.php` and `tests/Http/HealthControllerTest.php`, a `GET /health` route returning `{"status":"ok"}`, and a framework test that asserts that same response on two sequential requests. There is no name, path, template or other input, it creates no directory, and it writes only when `--apply` is given.',
         'Orbitron reads no application source, so it cannot tell you in advance whether the project already routes `GET /health` somewhere else. The generated test surfaces that conflict through the framework\'s own route discovery, on the first run after the scaffold is applied.',
         'Verification answers one narrow question: whether this project\'s Composer layout is the fixed one Orbitron supports. That layout is narrower than anything Kinetis itself requires, so an error means the project is outside what Orbitron assumes — not that route, command or listener discovery is broken. It establishes nothing else either: not request isolation, not non-blocking I/O, not security, not route uniqueness, not the correctness of any application code.',
@@ -49,8 +51,9 @@ final readonly class Context
         'Run `vendor/bin/kinetis orbitron:inspect` to read the installed Kinetis packages and their versions as JSON.',
         'Run `vendor/bin/kinetis orbitron:verify` to read whether this project\'s Composer layout is the one Orbitron supports; exit 3 means the document reports an error.',
         'Run `vendor/bin/kinetis orbitron:scaffold` to read the health-endpoint scaffold plan, and add `--apply` to create its two files; exit 3 means the document reports a refusal or a failed write.',
-        'An agent that speaks MCP can register `vendor/bin/kinetis-orbitron-mcp` instead and call the same documents as tools, with the Kinetis documentation served as resources from that one connection — there is no second server to configure.',
+        'An agent that speaks MCP can register `vendor/bin/kinetis-orbitron-mcp` instead and call the same documents as tools, with the Kinetis documentation served from that one connection — as resources, and as bounded line windows through ' . DocsApplication::READ_TOOL . ' for a page too long to take whole. There is no second server to configure.',
         'Route the task through Agent Workflow — over MCP, read the `kinetis://docs/agent-workflow` resource — then follow the matching recipe, reading each guide for the versions orbitron:inspect reports, not for main.',
+        'Use the installed-source listing, literal search and bounded window only to settle exact version-sensitive facts that materially govern the change. Once a fact is established, return to the application instead of inventorying unrelated package source.',
         'Before calling the change done, work through Agent Correctness Review and run the project\'s own test suite.',
         'Run any test or command that mutates a shared database, broker or object store one at a time, never two overlapping runs against the same state: concurrent mutation breaks test isolation and reports failures the code does not have.',
     ];
@@ -102,11 +105,19 @@ final readonly class Context
             ],
             [
                 'name' => 'orbitron_read_package_source',
-                'effect' => 'Reads one line window of one installed, non-root `kinetis/*` package\'s own source, at the version orbitron_inspect reports — the authority when a documentation page could describe a newer release. Takes `package` and `path` (exact `composer.json`, exact `README.md`, or a file beneath `src/`, `bin/` or `resources/`), plus optional `startLine` (default 1) and `lineCount` (1..200, default 200). A success reports `status`, `package`, `version`, `path`, `startLine`, `endLine`, `hasMore` and `content`; `hasMore: true` is a success, not a refusal, and the caller continues with `startLine` set to `endLine + 1`. A refusal reports only `status: error` and one of `package_unknown`, `path_not_admitted`, `source_missing`, `source_unreadable`, `source_oversize`, `source_not_text`, `line_out_of_range`. Read-only; both the inventory and the file content are read again on every call.',
+                'effect' => 'Reads one line window of one real installed, non-root package\'s own source, at the version this project has installed — the authority when a documentation page could describe a newer release, and when an exact dependency\'s behavior is what a task turns on. `orbitron_inspect` names the `kinetis/*` packages; the project\'s own `composer.lock` names every other. Takes `package` and `path` (exact `composer.json`, exact `README.md`, or a file beneath `src/`, `bin/` or `resources/`), plus optional `startLine` (default 1) and `lineCount` (1..200, default 200). A success reports `status`, `package`, `version`, `path`, `startLine`, `endLine`, `hasMore` and `content`; `hasMore: true` is a success, not a refusal, and the caller continues with `startLine` set to `endLine + 1`. A refusal reports only `status: error` and one of `package_unknown`, `path_not_admitted`, `source_missing`, `source_unreadable`, `source_oversize`, `source_not_text`, `line_out_of_range`. Read-only; both the inventory and the file content are read again on every call.',
             ],
             [
                 'name' => 'orbitron_search_package_source',
                 'effect' => 'Reports every line of one such file that contains a literal string, so a known file can be searched instead of read window by window. Takes `package` and `path` as above, a `query` of 1..256 characters matched case-sensitively, and optional `startLine` (default 1). A success reports `status`, `package`, `version`, `path`, `query`, `startLine`, `matches` and `hasMore`; each match is a `line` and the `content` of that line without its terminator, at most 50 of them. No match is a success with an empty `matches`. `hasMore: true` means a later line matches too: continue with `startLine` set to the last reported line plus one. Refusals are the same codes `orbitron_read_package_source` reports. Read-only. Use it to locate a line, then read a window around it; it searches the one file it is given, never a directory or a package.',
+            ],
+            [
+                'name' => 'orbitron_list_package_source',
+                'effect' => 'Lists the direct children of one directory of one such package — `src/`, `bin/` or `resources/` itself, or a directory beneath one — so a file can be found when the package is known and the path is not. Takes `package` and `path`, and nothing else: no recursion, pattern, filter or paging. A success reports `status`, `package`, `version`, `path` and `entries`; each entry is a `name` and a `type` of `file` or `directory`, in bytewise name order, and an empty directory is a success with an empty `entries`. Only children whose resolved target is a regular file or a directory still inside the same admitted location are reported, so a link out of the package and an unsupported entry are absent rather than listed. A refusal reports only `status: error` and one of `package_unknown`, `path_not_admitted` (the package root and a root file included), `source_missing`, `source_unreadable`, `source_not_directory`, or `directory_oversize` for more than 200 reportable children — which refuses the whole listing rather than reporting part of it. Read-only, and read live on every call.',
+            ],
+            [
+                'name' => DocsApplication::READ_TOOL,
+                'effect' => 'Reads one line window of one Kinetis documentation page — the same pages served as `kinetis://docs/*` resources — for a page too long to take whole. Takes `uri` and optional `startLine` (default 1) and `lineCount` (1..200, default 200). A success reports `status`, `uri`, `startLine`, `endLine`, `hasMore` and `content`; continue with `startLine` set to `endLine + 1`, and successive windows reconstruct the page exactly as long as it has not changed on the remote between calls — every call re-fetches it, and nothing is cached or snapshotted. A window ends at `lineCount` lines or 32768 bytes of content, whichever comes first, so read `endLine` rather than assuming it. A refusal reports only `status: error` and one of `resource_unknown`, `line_out_of_range`. Read-only, and the one tool that reaches the network: the tool, its bounds and its fetch belong to kinetis/mcp-docs, which this server composes rather than copies.',
             ],
         ],
         'resources' => [
@@ -123,11 +134,14 @@ final readonly class Context
 
     private const string SERVER = 'The MCP server speaks one protocol revision and serves the same documents the '
         . 'commands print, plus the documentation catalogue. It never boots the Kinetis application and accepts no '
-        . 'URL, origin, ref or command from a message. Four tools take no argument; the two that reach installed '
-        . 'source, orbitron_read_package_source and orbitron_search_package_source, take only a package name, a '
-        . 'relative path and an optional line window or a literal query, each validated for presence, type, range '
+        . 'URL, origin, ref or command from a message. Four tools take no argument; the three that reach installed '
+        . 'source, orbitron_read_package_source, orbitron_search_package_source and orbitron_list_package_source, '
+        . 'take only a package name, a relative path and — for the window and the search — an optional line window '
+        . 'or a literal query, each validated for presence, type, range '
         . 'and length before the package lookup; the path is then admitted against a fixed set of locations, and '
-        . 'the resolved target re-admitted, before anything reaches the filesystem. It is a local '
+        . 'the resolved target re-admitted, before anything reaches the filesystem. The documentation window takes '
+        . 'a page URI from that fixed catalogue and an optional line window, validated the same way by '
+        . 'kinetis/mcp-docs, which owns that tool whole. It is a local '
         . 'process your client launches, so that process and your filesystem permissions are the trust boundary '
         . 'for everything it reads and writes here; the one thing it reaches beyond them is the fixed documentation '
         . 'origin named above.';

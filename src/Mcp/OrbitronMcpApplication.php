@@ -22,41 +22,45 @@ use Kinetis\Orbitron\ScaffoldMode;
 use stdClass;
 
 /**
- * Orbitron's four documents, one installed-source window and one
- * installed-source search as MCP tools, and its context document plus
+ * Orbitron's four documents, one installed-source window, one
+ * installed-source search, one installed-source directory listing and
+ * the documentation window as MCP tools, and its context document plus
  * the Kinetis documentation as MCP resources, over the shared protocol
  * server. One connection is the whole project-local surface an agent
  * needs: there is no second server to register.
  *
  * Every document tool call reaches {@see Documents}, the same service
  * the CLI commands adapt: no command is invoked, no output is parsed,
- * and no envelope is built twice. Every `kinetis://docs/*` read reaches
- * the {@see DocsApplication} this object was handed, which owns the fixed
- * catalogue and the bounded fetch. kinetis/mcp-docs remains the
- * framework-agnostic owner of both and is installable on its own; none
- * of it is copied here.
+ * and no envelope is built twice. Every `kinetis://docs/*` read, and
+ * every call to the documentation window, reaches the
+ * {@see DocsApplication} this object was handed, which owns the fixed
+ * catalogue, the bounded fetch, and that tool's description, schema and
+ * validation alike. kinetis/mcp-docs remains the framework-agnostic
+ * owner of all of it and is installable on its own; none of it is
+ * copied here.
  *
  * The project root and that documentation application are the only
  * things this object holds; the inventory, the documents built from it
  * and the source reader are created for one operation and discarded
  * with its response. No MCP message can name a source body, a URL, an
  * origin, a ref, a template, a command or the inventory path: four tools
- * take no argument at all, a resource read selects one entry of a fixed
- * catalogue whose URLs are the documentation server's own constants, and
- * the two that take a path admit it only as a relative name under one
- * installed package: each schema is validated here in full before the
- * package lookup, and the path itself is admitted against a fixed set of
- * locations, with the resolved target re-admitted, before anything
- * reaches the filesystem. The two share that validation, and
- * {@see PackageSourceReader} is the one place a file behind either is
- * opened.
+ * take no argument at all, a resource read and the documentation window
+ * each select one entry of a fixed catalogue whose URLs are the
+ * documentation server's own constants, and the three that take a path
+ * admit it only as a relative name under one installed package: each
+ * schema is validated here in full before the package lookup, and the
+ * path itself is admitted against a fixed set of locations, with the
+ * resolved target re-admitted, before anything reaches the filesystem.
+ * The three share that validation, and {@see PackageSourceReader} is the
+ * one place a file or a directory behind any of them is opened.
  *
  * `orbitron_scaffold_apply` is the one tool that writes. Selecting it is
  * the whole mutation request, which is why it has no boolean to set: the
  * MCP client's configured approval policy controls whether it runs, and
  * the local process and filesystem permissions remain the authority
- * boundary for it. Reading a documentation page is the one operation
- * that leaves this machine, over HTTPS to that fixed origin.
+ * boundary for it. Reading a documentation page, as a resource or as a
+ * window, is the one operation that leaves this machine, over HTTPS to
+ * that fixed origin.
  *
  * Orbitron does not boot the Kinetis application here, so nothing about
  * running this server registers a route, a listener or a bootstrap.
@@ -71,6 +75,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
 
     public const string SEARCH_TOOL = 'orbitron_search_package_source';
 
+    public const string LIST_TOOL = 'orbitron_list_package_source';
+
     private const string DOCS_ENTRY_URI = 'kinetis://docs/agent-workflow';
 
     private const string INSTRUCTIONS = 'Orbitron reports what this project has, serves the Kinetis documentation, '
@@ -79,16 +85,22 @@ final readonly class OrbitronMcpApplication implements McpApplication
         . 'orbitron_verify for whether the project layout is the one Orbitron supports, and orbitron_scaffold_plan '
         . 'before orbitron_scaffold_apply, which is the only tool that writes. Before changing application code, '
         . 'read ' . self::DOCS_ENTRY_URI . ' and route the task through the pages it names — read them instead of '
-        . 'answering about Kinetis from memory. Those pages are published from main and can describe behavior newer '
+        . 'answering about Kinetis from memory. Read a page whole as a resource, or call '
+        . DocsApplication::READ_TOOL . ' with its URI for one bounded window when a whole page is more than the '
+        . 'client can take at once. Those pages are published from main and can describe behavior newer '
         . 'than this project has installed, so the versions orbitron_inspect reports and the installed source stay '
         . 'the authority for anything version-sensitive. A completed composer require or remove is visible to the '
         . 'next call, so nothing has to be restarted or reconnected. Call orbitron_read_package_source to read a '
-        . 'window of an installed kinetis/* package\'s own source, which is the authority whenever a page and the '
-        . 'installed version could differ. When the file is known but the relevant line is not, call '
-        . 'orbitron_search_package_source for a literal string in that file and read a window around a line it '
-        . 'reports: derive the file from the class and the package\'s own composer.json autoload map, or search '
-        . 'that package\'s README.md for the option or term to find the file. Read vendor/kinetis/* directly only '
-        . 'when neither yields a file, or a tool refuses.';
+        . 'window of an installed package\'s own source, which is the authority whenever a page and the installed '
+        . 'version could differ, and whenever an exact dependency\'s behavior is what the task turns on. Any '
+        . 'package this project really installed is readable, not only kinetis/*: orbitron_inspect names the '
+        . 'kinetis/* ones, and the project\'s own composer.lock names every other. When the file is known but '
+        . 'the relevant line is not, call orbitron_search_package_source for a literal string in that file and '
+        . 'read a window around a line it reports: derive the file from the class and the package\'s own '
+        . 'composer.json autoload map, or search that package\'s README.md for the option or term to find the '
+        . 'file. When the package is known but the file is not, call orbitron_list_package_source for the direct '
+        . 'children of src, bin or resources, or of a directory beneath one, and read or search a file it '
+        . 'names. Read vendor/ directly only when none of those yields a file, or a tool refuses.';
 
     /** The input schema the four document tools share: an object with no members and nothing else admitted. */
     private const string CLOSED_SCHEMA_DESCRIPTION = 'Takes no arguments.';
@@ -180,18 +192,21 @@ final readonly class OrbitronMcpApplication implements McpApplication
             ),
             new ToolDescription(
                 self::SOURCE_TOOL,
-                'Reports one window of one file of one installed kinetis/* package as a JSON document: the '
-                . 'package\'s own source, at the version orbitron_inspect reports, which is the authority when a '
-                . 'documentation page could describe a newer release. Takes the package name, a path relative to '
-                . 'the package root — composer.json, README.md, or a file under src/, bin/ or resources/ — and an '
-                . 'optional window. Reads nothing else and writes nothing.',
+                'Reports one window of one file of one installed package as a JSON document: that package\'s '
+                . 'own source, at the version this project has installed, which is the authority when a '
+                . 'documentation page could describe a newer release and when an exact dependency\'s behavior is '
+                . 'what the task turns on. Reach for a kinetis/* package first; any other installed dependency is '
+                . 'readable the same way. Takes the package name, a path relative to the package root — '
+                . 'composer.json, README.md, or a file under src/, bin/ or resources/ — and an optional window. '
+                . 'This project\'s own source is not readable through it. Reads nothing else and writes nothing.',
                 [
                     'type' => 'object',
                     'properties' => [
                         'package' => [
                             'type' => 'string',
                             'minLength' => 1,
-                            'description' => 'An installed package name, as orbitron_inspect reports it.',
+                            'description' => 'An installed package name: a kinetis/* one as orbitron_inspect '
+                                . 'reports it, or any other dependency as this project\'s composer.lock names it.',
                         ],
                         'path' => [
                             'type' => 'string',
@@ -220,9 +235,9 @@ final readonly class OrbitronMcpApplication implements McpApplication
             ),
             new ToolDescription(
                 self::SEARCH_TOOL,
-                'Reports every line of one file of one installed kinetis/* package that contains a literal '
-                . 'string, as a JSON document: the line numbers and the lines themselves, at the version '
-                . 'orbitron_inspect reports. Use it when the file is known but the line is not — derive the file '
+                'Reports every line of one file of one installed package that contains a literal '
+                . 'string, as a JSON document: the line numbers and the lines themselves, at the version this '
+                . 'project has installed. Use it when the file is known but the line is not — derive the file '
                 . 'from the class and that package\'s own composer.json autoload map, or search its README.md for '
                 . 'the option or term — then read a window around a line it reports with '
                 . self::SOURCE_TOOL . '. Takes the same package name and path, the exact string to look for, and '
@@ -235,7 +250,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
                         'package' => [
                             'type' => 'string',
                             'minLength' => 1,
-                            'description' => 'An installed package name, as orbitron_inspect reports it.',
+                            'description' => 'An installed package name: a kinetis/* one as orbitron_inspect '
+                                . 'reports it, or any other dependency as this project\'s composer.lock names it.',
                         ],
                         'path' => [
                             'type' => 'string',
@@ -261,6 +277,42 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 ],
                 self::readOnly(),
             ),
+            new ToolDescription(
+                self::LIST_TOOL,
+                'Reports the direct children of one directory of one installed package as a JSON '
+                . 'document: each child\'s name and whether it is a file or a directory, at the version this '
+                . 'project has installed. Use it when the package is known but the file is not, then read or '
+                . 'search a file it names. Takes the package name and a path naming src, bin or resources, or a '
+                . 'directory beneath one of them; the package root and a root file are not listable. It lists that '
+                . 'one directory and nothing under it: no recursion, no pattern, no filter, no paging. A directory '
+                . 'of more than ' . PackageSourceReader::MAX_ENTRY_COUNT . ' reportable children is refused whole '
+                . 'rather than reported in part. Reads nothing else and writes nothing.',
+                [
+                    'type' => 'object',
+                    'properties' => [
+                        'package' => [
+                            'type' => 'string',
+                            'minLength' => 1,
+                            'description' => 'An installed package name: a kinetis/* one as orbitron_inspect '
+                                . 'reports it, or any other dependency as this project\'s composer.lock names it.',
+                        ],
+                        'path' => [
+                            'type' => 'string',
+                            'minLength' => 1,
+                            'maxLength' => PackageSourceReader::MAX_PATH_LENGTH,
+                            'description' => 'The directory, relative to the package root, with / separators.',
+                        ],
+                    ],
+                    'required' => ['package', 'path'],
+                    'additionalProperties' => false,
+                ],
+                self::readOnly(),
+            ),
+            // Published exactly as kinetis/mcp-docs authors it — name,
+            // description, schema and annotations — and every call to it
+            // is handed back to that application below. Restating any of
+            // it here would give a client two accounts of one tool.
+            DocsApplication::readTool(),
         ];
     }
 
@@ -294,10 +346,10 @@ final readonly class OrbitronMcpApplication implements McpApplication
         ProgressEmitter $progress,
         ?object $context,
     ): ToolResult {
-        // The two tools that take arguments validate their whole closed
-        // schema here, before a name or a path reaches a lookup or the
-        // filesystem: a call a schema has no reading of is a protocol
-        // error, not a refusal document.
+        // The three tools that take arguments validate their whole
+        // closed schema here, before a name or a path reaches a lookup
+        // or the filesystem: a call a schema has no reading of is a
+        // protocol error, not a refusal document.
         if ($name === self::SOURCE_TOOL) {
             [$package, $path, $startLine, $lineCount] = self::sourceArguments($arguments);
             $reader = new PackageSourceReader($this->packages());
@@ -310,6 +362,20 @@ final readonly class OrbitronMcpApplication implements McpApplication
             $reader = new PackageSourceReader($this->packages());
 
             return self::result($reader->search($package, $path, $query, $startLine));
+        }
+
+        if ($name === self::LIST_TOOL) {
+            [$package, $path] = self::listArguments($arguments);
+            $reader = new PackageSourceReader($this->packages());
+
+            return self::result($reader->list($package, $path));
+        }
+
+        // The documentation window is the documentation server's own
+        // tool: its schema, its validation, its catalogue and its fetch.
+        // Nothing about the call is read or rewritten on the way through.
+        if ($name === DocsApplication::READ_TOOL) {
+            return $this->docs->callTool($name, $arguments, $progress, $context);
         }
 
         // Every other tool publishes a closed, empty schema, so an
@@ -362,9 +428,9 @@ final readonly class OrbitronMcpApplication implements McpApplication
 
     /**
      * The search call's arguments, validated the same way and from the
-     * same helpers: the two calls admit one package name, one path and
-     * one first line, so neither can be reachable with something the
-     * other refuses.
+     * same helpers: every call that names installed source admits one
+     * package name and one path, so none can be reachable with
+     * something another refuses.
      *
      * @return array{string, string, string, int}
      */
@@ -377,6 +443,23 @@ final readonly class OrbitronMcpApplication implements McpApplication
             self::text($values, 'path', PackageSourceReader::MAX_PATH_LENGTH),
             self::text($values, 'query', PackageSourceReader::MAX_QUERY_LENGTH),
             self::startLine($values),
+        ];
+    }
+
+    /**
+     * The listing call's arguments: the package name and the path, from
+     * the same helpers again, and nothing else — a listing has no
+     * window, query, depth or filter to take.
+     *
+     * @return array{string, string}
+     */
+    private static function listArguments(stdClass $arguments): array
+    {
+        $values = self::members($arguments, ['package', 'path']);
+
+        return [
+            self::text($values, 'package'),
+            self::text($values, 'path', PackageSourceReader::MAX_PATH_LENGTH),
         ];
     }
 
@@ -434,8 +517,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
     }
 
     /**
-     * The optional first line both calls count from, defaulting to the
-     * first line of the file.
+     * The optional first line the window and the search count from,
+     * defaulting to the first line of the file.
      *
      * @param array<string, mixed> $values
      */
@@ -493,11 +576,12 @@ final readonly class OrbitronMcpApplication implements McpApplication
     }
 
     /**
-     * Closed-world because a tool's whole read set is this project's own
-     * Composer metadata and manifest, and the installed source beneath
-     * the roots that metadata names: no network, no database, no other
-     * system to reach. Reading a documentation resource is the one
-     * operation that leaves this machine, and it is not a tool.
+     * Closed-world because these tools' whole read set is this project's
+     * own Composer metadata and manifest, and the installed source
+     * beneath the roots that metadata names: no network, no database, no
+     * other system to reach. The documentation window is the one tool
+     * that leaves this machine, and kinetis/mcp-docs annotates it
+     * open-world itself.
      */
     private static function readOnly(): ToolAnnotations
     {
