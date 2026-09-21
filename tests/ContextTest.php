@@ -246,6 +246,25 @@ final class ContextTest extends TestCase
     }
 
     /**
+     * An agent reaching for an attribute where the middleware already
+     * says it produces a document that drifts from what runs, and one
+     * reading the attribute as a way to open a route produces a document
+     * that lies about a request the middleware still rejects. The
+     * workflow names which of the two to use and what the attribute does
+     * not do, and points at the guides for the rules.
+     */
+    public function test_the_workflow_documents_authentication_from_the_middleware_that_enforces_it(): void
+    {
+        $workflow = implode("\n", self::context()->toArray()['workflow']);
+
+        self::assertStringContainsString('SecurityDescriberInterface', $workflow);
+        self::assertStringContainsString('kinetis/auth and kinetis/auth-jwt', $workflow);
+        self::assertStringContainsString('#[OpenApiSecurity]', $workflow);
+        self::assertStringContainsString('changes the document alone and admits no request', $workflow);
+        self::assertStringContainsString('kinetis://docs/routing-validation', $workflow);
+    }
+
+    /**
      * The document every agent reads once per task owns the stop
      * decision: bounded windows answer named unknowns, then implementation
      * begins once the recipe's contracts and versions are established.
