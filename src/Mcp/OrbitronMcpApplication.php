@@ -58,8 +58,8 @@ use stdClass;
  * the whole mutation request, which is why it has no boolean to set: the
  * MCP client's configured approval policy controls whether it runs, and
  * the local process and filesystem permissions remain the authority
- * boundary for it. Reading a documentation page, as a resource or as a
- * window, is the one operation that leaves this machine, over HTTPS to
+ * boundary for it. Reading a documentation page, as a window or as a
+ * resource, is the one operation that leaves this machine, over HTTPS to
  * that fixed origin.
  *
  * Orbitron does not boot the Kinetis application here, so nothing about
@@ -85,10 +85,11 @@ final readonly class OrbitronMcpApplication implements McpApplication
         . 'orbitron_verify for whether the project layout is the one Orbitron supports, and orbitron_scaffold_plan '
         . 'before orbitron_scaffold_apply, which is the only tool that writes. Before changing application code, '
         . 'read ' . self::DOCS_ENTRY_URI . ' and route the task through the pages it names — read them instead of '
-        . 'answering about Kinetis from memory. Read a page whole as a resource, or call '
-        . DocsApplication::READ_TOOL . ' with its URI for one bounded window when a whole page is more than the '
-        . 'client can take at once. Those pages are published from main and can describe behavior newer '
-        . 'than this project has installed, so the versions orbitron_inspect reports and the installed source stay '
+        . 'answering about Kinetis from memory. Read a page by calling ' . DocsApplication::READ_TOOL . ' with its '
+        . 'URI from line 1 and continuing from the line it reports, only while the section you were routed to or a '
+        . 'named unknown is unresolved; read it whole as a resource when the complete page is what you need. '
+        . 'Those pages are published from main and can describe behavior newer than this project has installed, '
+        . 'so the versions orbitron_inspect reports and the installed source stay '
         . 'the authority for anything version-sensitive. A completed composer require or remove is visible to the '
         . 'next call, so nothing has to be restarted or reconnected. Call orbitron_read_package_source to read a '
         . 'window of an installed package\'s own source, which is the authority whenever a page and the installed '

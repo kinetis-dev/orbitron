@@ -103,6 +103,32 @@ final class OrbitronMcpApplicationTest extends TestCase
         self::assertStringContainsString(OrbitronMcpApplication::CONTEXT_URI, $result['instructions']);
     }
 
+    /**
+     * The instructions send a client to the bounded window first and to
+     * the whole-page resource only for a complete page, while
+     * {@see \Kinetis\Orbitron\Context} owns the full workflow rule.
+     */
+    public function test_the_instructions_teach_the_bounded_window_before_the_whole_page(): void
+    {
+        $instructions = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":'
+            . '"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"2.1.273"}}}'])[0]
+            ['result']['instructions'];
+
+        self::assertStringContainsString(
+            'Read a page by calling ' . DocsApplication::READ_TOOL . ' with its URI from line 1',
+            $instructions,
+        );
+        self::assertStringContainsString(
+            'only while the section you were routed to or a named unknown is unresolved',
+            $instructions,
+        );
+        self::assertStringContainsString(
+            'read it whole as a resource when the complete page is what you need',
+            $instructions,
+        );
+        self::assertStringNotContainsString('more than the client can take at once', $instructions);
+    }
+
     public function test_the_document_tools_are_published_with_closed_empty_schemas(): void
     {
         $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];

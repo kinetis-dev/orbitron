@@ -245,6 +245,29 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('reports failures the code does not have', $workflow);
     }
 
+    /**
+     * The document every agent reads once per task owns the stop
+     * decision: bounded windows answer named unknowns, then implementation
+     * begins once the recipe's contracts and versions are established.
+     */
+    public function test_the_workflow_reads_documentation_in_bounded_windows_and_names_when_to_stop(): void
+    {
+        $workflow = implode("\n", self::context()->toArray()['workflow']);
+
+        self::assertStringContainsString(DocsApplication::READ_TOOL . ' from line 1', $workflow);
+        self::assertStringContainsString(
+            'take the next window only while the section the recipe named, or a named unknown, is still unresolved',
+            $workflow,
+        );
+        self::assertStringContainsString('only when the complete page is what you need', $workflow);
+        self::assertStringContainsString(
+            'Once the recipe\'s required contracts and the installed versions are established, implement',
+            $workflow,
+        );
+        self::assertStringContainsString('any further read must answer a named unknown', $workflow);
+        self::assertStringNotContainsString('too long to take whole', $workflow);
+    }
+
     public function test_the_workflow_bounds_installed_source_reading_to_material_facts(): void
     {
         $workflow = implode("\n", self::context()->toArray()['workflow']);

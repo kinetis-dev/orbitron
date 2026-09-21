@@ -355,9 +355,9 @@ the per-client configuration paths.
 | `orbitron_read_package_source` | One line window of one installed package's own source. Read-only. |
 | `orbitron_search_package_source` | The lines of one such file that contain a literal string. Read-only. |
 | `orbitron_list_package_source` | The direct children of one directory of such a package, with the kind of each. Read-only. |
-| `kinetis_read_doc` | One line window of one Kinetis documentation page. Read-only, and the one tool that reaches the network. |
+| `kinetis_read_doc` | One line window of one Kinetis documentation page — how a page is read. Read-only, and the one tool that reaches the network. |
 | `kinetis://orbitron/context` | The `orbitron:context` document, as Markdown. |
-| `kinetis://docs/<page>` | One Kinetis documentation page, as Markdown. `resources/list` names every page; start at `kinetis://docs/agent-workflow`. |
+| `kinetis://docs/<page>` | One whole Kinetis documentation page, as Markdown, for when the complete page is needed. `resources/list` names every page, and `kinetis://docs/agent-workflow` is the entry page. |
 
 `orbitron_scaffold_apply` writes to the project. Selecting it *is* the
 mutation request: it takes no argument, and your MCP client's own
@@ -488,15 +488,16 @@ package stays framework-agnostic and independently installable, so a
 project that wants the documentation without the harness registers
 `vendor/bin/kinetis-mcp-docs` on its own instead of Orbitron.
 
-Read a page whole as its `kinetis://docs/<page>` resource, or call
-`kinetis_read_doc` with that URI for one bounded window of it: at most
-200 lines and 32 KiB of content per call, reporting the `endLine` it
-reached and whether more follows, so a page too long for one tool result
-is read in order without a cursor. Concatenating a page's windows
-reproduces it exactly, as long as the page has not changed on `main`
-between calls — every call fetches it again, and nothing is cached or
-snapshotted. That tool's schema, bounds, refusal codes and
-documentation belong to `kinetis/mcp-docs`.
+Read a page by calling `kinetis_read_doc` with its URI from line 1: at
+most 200 lines and 32 KiB of content per call, reporting the `endLine`
+it reached and whether more follows, so a page is read in order without
+a cursor. Take the next window only while the section you were routed
+to, or a named unknown, is still unresolved; read the whole page as its
+`kinetis://docs/<page>` resource when the complete page is what you
+need. Concatenating a page's windows reproduces it exactly, as long as
+the page has not changed on `main` between calls — every call fetches it
+again, and nothing is cached or snapshotted. That tool's schema, bounds,
+refusal codes and documentation belong to `kinetis/mcp-docs`.
 
 A page is fetched when it is read, from a URL built out of that package's
 two constants — nothing chooses an origin, a ref or a path. TLS is
@@ -616,8 +617,8 @@ tools](#the-installed-source-tools). Every command declares
 no package or application bootstrap runs either way.
 
 One operation leaves this machine, and only over MCP: reading a
-documentation page — whole as a `kinetis://docs/*` resource, or one
-window of it with `kinetis_read_doc` — which `kinetis/mcp-docs` fetches
+documentation page — one window of it with `kinetis_read_doc`, or whole
+as a `kinetis://docs/*` resource — which `kinetis/mcp-docs` fetches
 over HTTPS from its own fixed origin under the bounds
 [above](#the-documentation-resources). It carries no credential, sends
 nothing about your project, and no message can redirect it. The four
