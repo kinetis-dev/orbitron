@@ -10,9 +10,9 @@
     ],
     "require": {
         "php": "^8.4",
-        "kinetis/framework": "dev-main",
-        "kinetis/mcp-docs": "dev-main",
-        "kinetis/mcp-protocol": "dev-main",
+        "kinetis/framework": "^1.15.0",
+        "kinetis/mcp-docs": "^1.5.1",
+        "kinetis/mcp-protocol": "^1.0.0",
         "composer-runtime-api": "^2.0"
     },
     "require-dev": {
@@ -39,20 +39,6 @@
             "scan": "Kinetis\\Orbitron\\Console\\"
         }
     },
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../framework"
-        },
-        {
-            "type": "path",
-            "url": "../mcp-docs"
-        },
-        {
-            "type": "path",
-            "url": "../mcp-protocol"
-        }
-    ],
     "config": {
         "sort-packages": true,
         "allow-plugins": {
