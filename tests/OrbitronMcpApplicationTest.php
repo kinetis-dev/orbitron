@@ -1160,19 +1160,34 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The package root and its two readable files are not listable, so
-     * the one tool that names a directory cannot be pointed at one.
+     * `.` is the path that names the package root, and through the real
+     * tool surface it reports that root's own content: the project's own
+     * `vendor` tree, which is really there, is absent. A root file is
+     * ordinary readable content, so naming one in a listing is the wrong
+     * kind of thing rather than an unserved path.
      *
      * @throws JsonException
      */
-    public function test_a_root_file_is_not_listable(): void
+    public function test_the_root_token_lists_the_package_and_a_root_file_is_not_a_directory(): void
     {
+        $root = $this->call(
+            '{"package":"' . self::PACKAGE . '","path":"."}',
+            OrbitronMcpApplication::LIST_TOOL,
+        );
+
+        self::assertSame('.', $root['path']);
+        self::assertSame([
+            ['name' => 'composer.json', 'type' => 'file'],
+            ['name' => 'src', 'type' => 'directory'],
+            ['name' => 'tests', 'type' => 'directory'],
+        ], $root['entries']);
+
         $document = $this->call(
             '{"package":"' . self::PACKAGE . '","path":"composer.json"}',
             OrbitronMcpApplication::LIST_TOOL,
         );
 
-        self::assertSame(['status' => 'error', 'code' => 'path_not_admitted'], $document);
+        self::assertSame(['status' => 'error', 'code' => 'source_not_directory'], $document);
     }
 
     /**

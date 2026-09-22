@@ -26,9 +26,10 @@ use SplFileInfo;
  * calls reach past this package. `Composer\InstalledVersions::getInstalled()`
  * loads `vendor/composer/installed.php` itself. That file, the project's
  * own `composer.json`, and the admitted files beneath the install roots
- * Composer names — `composer.json`, `README.md` and what lies under
- * `src/`, `bin/` or `resources/` in a real installed, non-root package —
- * are the whole file-read set the documented boundary admits to.
+ * Composer names — any file under the root of a real installed,
+ * non-root package, short of a hidden name and that package's own
+ * top-level `vendor/` — are the whole file-read set the documented
+ * boundary admits to.
  * `Kinetis\McpDocs\DocsApplication`, which the MCP server composes,
  * fetches a documentation page over HTTPS from its own fixed origin
  * under its own bounds. Neither is opened from here, and the import test

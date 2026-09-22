@@ -23,15 +23,15 @@ namespace Kinetis\Orbitron;
  * Nothing here is chosen by a caller except the package name, the
  * relative path, and the window or the query. All three calls reach the
  * filesystem through one resolver: the install root comes from
- * Composer's own installed set; the path is admitted against the fixed
- * locations the call serves before anything is opened; and the resolved
- * target must still sit in the admitted location the request named. A
- * symlink is therefore resolved and then re-admitted, so one pointing
- * out of the package, or at a part of it this tool does not serve, is
- * refused rather than followed — and a listing re-admits each child the
- * same way, so it reports only what a read of that name could reach. A
- * refusal names a fixed code and nothing else — no resolved path, no
- * exception text, no content.
+ * Composer's own installed set and is the whole read boundary; the path
+ * is admitted by its syntax alone before anything is opened; and the
+ * resolved target must satisfy that same syntax and still lie under
+ * that same root. A symlink is therefore resolved and then re-admitted,
+ * so one pointing out of the package, or at a name this tool does not
+ * serve, is refused rather than followed — and a listing re-admits each
+ * child the same way, so it reports only what a read of that name could
+ * reach. A refusal names a fixed code and nothing else — no resolved
+ * path, no exception text, no content.
  *
  * Both bounds are enforced by construction: a read is one stream read of
  * the admitted size plus one byte, and that byte alone tells an admitted
@@ -62,11 +62,12 @@ final readonly class PackageSourceReader
     /** The most entries one listing returns; the child past it refuses the call. */
     public const int MAX_ENTRY_COUNT = 200;
 
-    /** The locations a file read serves: the two package-root files and the three directories. */
-    private const array FILE_LOCATIONS = ['composer.json', 'README.md', 'src', 'bin', 'resources'];
-
-    /** The locations a listing serves. A package root and a root file are not listable. */
-    private const array DIRECTORY_LOCATIONS = ['src', 'bin', 'resources'];
+    /**
+     * The one path that names the package root itself. Only a listing
+     * takes it: it is where a caller starts when the layout is unknown,
+     * and there is no file behind it for a read to open.
+     */
+    private const string ROOT = '.';
 
     public function __construct(private InstalledPackages $packages) {}
 
@@ -192,23 +193,24 @@ final readonly class PackageSourceReader
      * nothing, so what comes back is one directory as it is, and a
      * subdirectory is listed by naming it in the next call.
      *
-     * A child is reported only when its resolved target is a regular
-     * file or a directory still inside the same admitted location, which
-     * is the rule {@see read()} applies to the path it is given: a link
-     * out of the package, a link to a part of it this tool does not
-     * serve, a dangling one, and a socket, device or fifo are left out
-     * rather than offered as something to read next.
+     * A child is reported only when both its own name and the target it
+     * resolves to are admitted under the same install root, which is the
+     * rule {@see read()} applies to the path it is given: a hidden entry,
+     * the package's own top-level `vendor` tree, a link out of the
+     * package, a link to either of those, a dangling one, and a socket,
+     * device or fifo are left out rather than offered as something to
+     * read next.
      *
      * The count is the bound. A directory whose reportable children pass
      * {@see MAX_ENTRY_COUNT} refuses whole, because a prefix of a
      * directory silently answers "what is in here" with something else.
      *
-     * @param string $path relative `/` syntax naming `src`, `bin` or
-     *        `resources`, or a directory beneath one
+     * @param string $path relative `/` syntax naming a directory under
+     *        the package root, or {@see ROOT} for the root itself
      */
     public function list(string $package, string $path): Document
     {
-        $resolved = $this->resolve($package, $path, self::DIRECTORY_LOCATIONS);
+        $resolved = $this->resolve($package, $path, listing: true);
 
         if ($resolved instanceof Document) {
             return $resolved;
@@ -220,7 +222,7 @@ final readonly class PackageSourceReader
             return self::refuse('source_not_directory');
         }
 
-        $entries = self::children($resolved['root'], $resolved['location'], $resolved['target']);
+        $entries = self::children($resolved['root'], $resolved['target']);
 
         if ($entries instanceof Document) {
             return $entries;
@@ -253,7 +255,7 @@ final readonly class PackageSourceReader
      */
     private function load(string $package, string $path): array|Document
     {
-        $resolved = $this->resolve($package, $path, self::FILE_LOCATIONS);
+        $resolved = $this->resolve($package, $path, listing: false);
 
         if ($resolved instanceof Document) {
             return $resolved;
@@ -315,14 +317,17 @@ final readonly class PackageSourceReader
      * differ only in what they do with the target. Admitting the path
      * the caller wrote only bounds where the request pointed: a symlink
      * moves where it landed, so the resolved target is admitted again
-     * and must sit in the same location — `src/Link.php` reaching the
-     * README, the test suite or the vendor tree is a read of something
-     * this tool does not serve, however admitted its own name was.
+     * and must still lie under the same install root — `src/Link.php`
+     * reaching `.env`, the package's own vendor tree or anything outside
+     * the package is a read of something this tool does not serve,
+     * however admitted its own name was.
      *
-     * @param list<string> $admitted the locations the calling operation serves
-     * @return array{version: string, root: string, location: string, target: string}|Document
+     * @param bool $listing whether this call may name the package root
+     *        with {@see ROOT}: a listing has that directory to report,
+     *        and a read has no file behind it.
+     * @return array{version: string, root: string, target: string}|Document
      */
-    private function resolve(string $package, string $path, array $admitted): array|Document
+    private function resolve(string $package, string $path, bool $listing): array|Document
     {
         $source = $this->packages->source($package);
 
@@ -330,9 +335,9 @@ final readonly class PackageSourceReader
             return self::refuse('package_unknown');
         }
 
-        $location = self::location($path);
+        $named = $listing && $path === self::ROOT;
 
-        if ($location === null || !in_array($location, $admitted, true)) {
+        if (!$named && !self::admits($path)) {
             return self::refuse('path_not_admitted');
         }
 
@@ -343,21 +348,24 @@ final readonly class PackageSourceReader
             return self::refuse('source_missing');
         }
 
-        // The separator keeps a sibling directory whose name merely
-        // starts with the root's out, and rejects a target that resolved
-        // anywhere else.
-        if (!str_starts_with($target, $root . DIRECTORY_SEPARATOR)) {
-            return self::refuse('source_unreadable');
-        }
+        // The root token resolves to the root, so only a path under it
+        // has somewhere else it could have landed.
+        if (!$named) {
+            // The separator keeps a sibling directory whose name merely
+            // starts with the root's out, and rejects a target that
+            // resolved anywhere else.
+            if (!str_starts_with($target, $root . DIRECTORY_SEPARATOR)) {
+                return self::refuse('source_unreadable');
+            }
 
-        if (self::location(self::relative($root, $target)) !== $location) {
-            return self::refuse('path_not_admitted');
+            if (!self::admits(self::relative($root, $target))) {
+                return self::refuse('path_not_admitted');
+            }
         }
 
         return [
             'version' => $source['version'],
             'root' => $root,
-            'location' => $location,
             'target' => $target,
         ];
     }
@@ -371,10 +379,9 @@ final readonly class PackageSourceReader
      * quietly missing one entry is not the directory it claims to be.
      *
      * @param string $root the resolved install root every child must stay under
-     * @param string $location the admitted location every child must resolve back into
      * @return list<array{name: string, type: string}>|Document
      */
-    private static function children(string $root, string $location, string $target): array|Document
+    private static function children(string $root, string $target): array|Document
     {
         // Suppressed for the reason the file open is: a directory that
         // cannot be opened is the returned code, not a warning on a
@@ -398,7 +405,7 @@ final readonly class PackageSourceReader
                     return self::refuse('source_unreadable');
                 }
 
-                $type = self::classify($root, $location, $target . DIRECTORY_SEPARATOR . $name);
+                $type = self::classify($root, $target . DIRECTORY_SEPARATOR . $name);
 
                 if ($type === null) {
                     continue;
@@ -421,22 +428,28 @@ final readonly class PackageSourceReader
     }
 
     /**
-     * `file` or `directory` for a child whose resolved target is one and
-     * still sits in the admitted location, or null for a child this tool
-     * does not serve.
+     * `file` or `directory` for a child that is one and is admitted both
+     * by its own name and by the target it resolves to, or null for a
+     * child this tool does not serve.
      *
      * The link is resolved rather than asked about: a link and a file
      * are the same thing to the tools that would read what is listed, so
      * what matters is where the child lands and what is there — not how
-     * it got there.
+     * it got there. The name is nonetheless decided on its own, because
+     * a listing that named a hidden link to an ordinary file would offer
+     * a name {@see read()} refuses.
      */
-    private static function classify(string $root, string $location, string $child): ?string
+    private static function classify(string $root, string $child): ?string
     {
+        if (!self::admits(self::relative($root, $child))) {
+            return null;
+        }
+
         $resolved = realpath($child);
 
         if ($resolved === false
             || !str_starts_with($resolved, $root . DIRECTORY_SEPARATOR)
-            || self::location(self::relative($root, $resolved)) !== $location) {
+            || !self::admits(self::relative($root, $resolved))) {
             return null;
         }
 
@@ -447,38 +460,51 @@ final readonly class PackageSourceReader
         };
     }
 
-    /** One resolved target as the relative path a location is read from. */
+    /** One path under the install root as the relative path a call names it by. */
     private static function relative(string $root, string $target): string
     {
         return str_replace(DIRECTORY_SEPARATOR, '/', substr($target, strlen($root) + 1));
     }
 
     /**
-     * The location a path names — the root file itself, or the top
-     * directory everything below it lies in — or null when the path is
-     * outside the syntax this tool admits. Whether that location is one
-     * the call serves is {@see resolve()}'s decision, because a read and
-     * a listing do not serve the same set.
+     * Whether one relative path is one this tool serves, decided by its
+     * syntax alone: the path a caller wrote, the path a symlink resolved
+     * to, and every child a listing considers all pass through here.
      *
-     * An empty segment covers a leading or trailing slash and a doubled
-     * one, so no separator form reaches the filesystem; `.` and `..` are
-     * refused outright rather than resolved and then checked.
+     * The install root is the boundary because an installed package puts
+     * its production source where its own autoload map says — at the
+     * package root for a root-mapped namespace, under `lib`, beside
+     * generated and classmap files — so a fixed list of directories
+     * would refuse the package's real evidence while proving nothing.
+     * What is refused is what is not that package's own readable
+     * content: an empty segment, which covers the empty path as well as
+     * a leading, trailing or doubled separator; a segment opening with a
+     * dot, which covers `.`, `..` and every hidden name such as `.git`
+     * or `.env`; a backslash or a NUL anywhere; and a first segment of
+     * `vendor`, which keeps a read inside the package the call named
+     * rather than crossing into a dependency tree under its identity. A
+     * `vendor` directory deeper down is the package's own content and is
+     * served.
      */
-    private static function location(string $path): ?string
+    private static function admits(string $path): bool
     {
-        if ($path === '' || str_contains($path, '\\') || str_contains($path, "\0")) {
-            return null;
+        if (str_contains($path, '\\') || str_contains($path, "\0")) {
+            return false;
         }
 
         $segments = explode('/', $path);
 
+        if ($segments[0] === 'vendor') {
+            return false;
+        }
+
         foreach ($segments as $segment) {
-            if ($segment === '' || $segment === '.' || $segment === '..') {
-                return null;
+            if ($segment === '' || str_starts_with($segment, '.')) {
+                return false;
             }
         }
 
-        return $segments[0];
+        return true;
     }
 
     /**

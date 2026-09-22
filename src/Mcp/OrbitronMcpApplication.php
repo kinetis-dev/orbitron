@@ -99,9 +99,10 @@ final readonly class OrbitronMcpApplication implements McpApplication
         . 'the relevant line is not, call orbitron_search_package_source for a literal string in that file and '
         . 'read a window around a line it reports: derive the file from the class and the package\'s own '
         . 'composer.json autoload map, or search that package\'s README.md for the option or term to find the '
-        . 'file. When the package is known but the file is not, call orbitron_list_package_source for the direct '
-        . 'children of src, bin or resources, or of a directory beneath one, and read or search a file it '
-        . 'names. Read vendor/ directly only when none of those yields a file, or a tool refuses.';
+        . 'file. When the package is known but the file is not, call orbitron_list_package_source for the '
+        . 'direct children of the package root, named as ".", or of any directory under it, and read or '
+        . 'search a file it names. Read vendor/ directly only when none of those yields a file, or a tool '
+        . 'refuses.';
 
     /** The input schema the four document tools share: an object with no members and nothing else admitted. */
     private const string CLOSED_SCHEMA_DESCRIPTION = 'Takes no arguments.';
@@ -197,9 +198,10 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 . 'own source, at the version this project has installed, which is the authority when a '
                 . 'documentation page could describe a newer release and when an exact dependency\'s behavior is '
                 . 'what the task turns on. Reach for a kinetis/* package first; any other installed dependency is '
-                . 'readable the same way. Takes the package name, a path relative to the package root — '
-                . 'composer.json, README.md, or a file under src/, bin/ or resources/ — and an optional window. '
-                . 'This project\'s own source is not readable through it. Reads nothing else and writes nothing.',
+                . 'readable the same way. Takes the package name, a path to any file under that package\'s '
+                . 'install root — a root-mapped class sitting beside composer.json included — and an optional '
+                . 'window. A hidden name and that package\'s own top-level vendor/ are not served, and this '
+                . 'project\'s own source is not readable through it. Reads nothing else and writes nothing.',
                 [
                     'type' => 'object',
                     'properties' => [
@@ -283,8 +285,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 'Reports the direct children of one directory of one installed package as a JSON '
                 . 'document: each child\'s name and whether it is a file or a directory, at the version this '
                 . 'project has installed. Use it when the package is known but the file is not, then read or '
-                . 'search a file it names. Takes the package name and a path naming src, bin or resources, or a '
-                . 'directory beneath one of them; the package root and a root file are not listable. It lists that '
+                . 'search a file it names. Takes the package name and a path naming any directory under that '
+                . 'package\'s install root, or "." for the root itself. It lists that '
                 . 'one directory and nothing under it: no recursion, no pattern, no filter, no paging. A directory '
                 . 'of more than ' . PackageSourceReader::MAX_ENTRY_COUNT . ' reportable children is refused whole '
                 . 'rather than reported in part. Reads nothing else and writes nothing.',
@@ -301,7 +303,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
                             'type' => 'string',
                             'minLength' => 1,
                             'maxLength' => PackageSourceReader::MAX_PATH_LENGTH,
-                            'description' => 'The directory, relative to the package root, with / separators.',
+                            'description' => 'The directory, relative to the package root, with / separators; '
+                                . '"." is the package root itself.',
                         ],
                     ],
                     'required' => ['package', 'path'],

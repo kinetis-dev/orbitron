@@ -405,11 +405,17 @@ checkout is not one of them.
 | `startLine` | integer | Optional, at least 1, default `1`. |
 | `lineCount` | integer | Optional, 1 to 200, default `200`. |
 
-`path` must resolve to exact `composer.json`, exact `README.md`, or a
-file beneath `src/`, `bin/` or `resources/`. The resolved target — a
-symlink included, re-admitted against that same location once resolved —
-must stay inside it, must be a regular file, must be at most 1 MiB, and
-must be UTF-8 text with no NUL byte. Every argument is validated against
+`path` is any file under that package's install root: a class the
+autoload map points at the root itself, `src/`, `lib/`, a generated or
+classmap directory, the package's own tests, `composer.json` and
+`README.md` alike. It is relative, `/`-separated, and has no empty
+segment, no segment beginning with `.` — which refuses `.`, `..` and a
+hidden name such as `.git` or `.env` — and no first segment of `vendor`,
+which keeps the read inside the named package rather than its dependency
+tree. A `vendor` directory deeper down is that package's own content. The
+resolved target — a symlink included, re-admitted against those same
+rules once resolved — must stay under that root, must be a regular file,
+must be at most 1 MiB, and must be UTF-8 text with no NUL byte. Every argument is validated against
 this schema before any lookup or read runs; a call outside it is a
 JSON-RPC `-32602` protocol error, not a refusal document.
 
@@ -449,27 +455,28 @@ is known and the path is not, and takes only the same `package` and a
 | `package` | string | Required, non-empty, an installed, non-root package name. |
 | `path` | string | Required, non-empty, at most 256 Unicode code points. |
 
-`path` must name `src/`, `bin/` or `resources/` itself, or a directory
-beneath one of them; the package root and its two readable root files
-are not listable. There is no recursion, pattern, filter or paging
-argument — a subdirectory is listed by naming it in the next call.
+`path` is any directory under that package's install root, under the
+same syntax the window takes, or the single literal `.` for the root
+itself — which is where to start when the layout is unknown. There is no
+recursion, pattern, filter or paging argument — a subdirectory is listed
+by naming it in the next call.
 
 A success reports `status: "ok"`, `package`, `version`, `path` and
 `entries`: the direct children, each as a `name` and a `type` of
 `"file"` or `"directory"`, in bytewise name order. An empty directory is
-a success with an empty list. A child is reported only when its resolved
-target is a regular file or a directory still inside the same admitted
-location, so a link out of the package, a link to a part of it this tool
-does not serve, a dangling link and a special file are absent rather
-than offered as something to read. A refusal reports only
+a success with an empty list. A child is reported only when its own name
+and the target it resolves to are both admitted under the same install
+root, so a hidden entry, the package's own top-level `vendor/`, a link
+onto either of those, a link out of the package, a dangling link and a
+special file are absent rather than offered as something to read. A refusal reports only
 `status: "error"` and one `code`: `package_unknown`, `path_not_admitted`,
 `source_missing`, `source_unreadable`, `source_not_directory` for an
 admitted path behind a regular file, or `directory_oversize` for a
 directory of more than 200 reportable children — which refuses the whole
 listing rather than reporting part of one.
 
-Use them together: list the package's `src/` and the directory the task
-is about, or derive a file from the class and that package's own
+Use them together: list the package root with `.`, then the directory
+the task is about, or derive a file from the class and that package's own
 `composer.json` autoload map, or find it by searching the package's
 `README.md` for the option or term; then search the file and read a
 window around a reported line. No tool here searches across a package,
@@ -542,7 +549,10 @@ that already exists, the checked-in form of the registration above is:
   `kinetis://orbitron/context` and `kinetis://docs/agent-workflow`, call
   `orbitron_inspect`, call `orbitron_verify`, and then either one
   readiness line beginning `Orbitron ready` or no application change at
-  all and the exact failure;
+  all and the exact failure. Its milestone check updates
+  application-specific README claims made false by the work while
+  preserving reusable Kinetis and Orbitron setup reference unless that
+  setup itself changed;
 - `CLAUDE.md` and `GEMINI.md` containing `@AGENTS.md` and nothing else;
 - `.mcp.json`, `.codex/config.toml` and `.gemini/settings.json`, each
   naming one stdio server `orbitron` launched as `./bin/orbitron-mcp`,
@@ -595,13 +605,11 @@ Orbitron reads three things on this machine and nothing more: Composer's
 installed-package metadata, the project's own `composer.json` — bounded
 as described above — and, for the scaffold, the existence and symlink
 state of four fixed directories and two fixed paths. Over MCP only, it
-also reads a bounded line window of one real installed, non-root
-package's own `composer.json`, `README.md`, or a file beneath `src/`,
-`bin/` or `resources/`, searches one such file for a literal string, and
-lists the direct children of `src/`, `bin/` or `resources/` or of a
-directory beneath one — never the Composer root project, the
-application's own source, or anything in an installed package outside
-those five locations, its own tests included. No configuration, no
+also reads a bounded line window of any file under one real installed,
+non-root package's install root, searches one such file for a literal
+string, and lists any directory under that same root — never the
+Composer root project, the application's own source, a hidden name, or
+that package's own top-level `vendor/`. No configuration, no
 credentials. It starts no process. That metadata is the one generated
 file `vendor/composer/installed.php`: a command reads it through
 `Composer\InstalledVersions`, which loads it itself, and the MCP server
@@ -609,10 +617,9 @@ evaluates that same fixed path under the detected project root, which no
 message can name. Beyond that one file, the commands and every
 MCP tool but three reach nothing else under `vendor/`; only
 `orbitron_read_package_source`, `orbitron_search_package_source` and
-`orbitron_list_package_source` read further, and only inside the one
-admitted location of the one installed, non-root package a call
-names — see [The installed-source
-tools](#the-installed-source-tools). Every command declares
+`orbitron_list_package_source` read further, and only under the install
+root of the one installed, non-root package a call names — see [The
+installed-source tools](#the-installed-source-tools). Every command declares
 `bootstrap: false`, and the MCP binary boots no application at all, so
 no package or application bootstrap runs either way.
 
@@ -631,7 +638,7 @@ to either write target: the project root comes from the framework's own
 `Kinetis\Runtime\ProjectRoot::detect()`, reading Composer's generated bin
 proxy, and every name below it is a constant. The three installed-source
 tools are the only calls that do take a caller-supplied path, and only
-for reading — admitted against a fixed set of locations, with the
+for reading — admitted by syntax against that one install root, with the
 resolved target re-admitted, before anything reaches the filesystem. The MCP
 server is a local process your client launches, so that process and
 your filesystem permissions are the authority boundary.

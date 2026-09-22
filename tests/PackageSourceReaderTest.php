@@ -136,7 +136,11 @@ final class PackageSourceReaderTest extends TestCase
     }
 
     /**
-     * The three other admitted locations, each reached by name.
+     * The layouts a real installed package keeps its own content in. The
+     * install root is the boundary, so a root-mapped class beside the
+     * manifest, a `lib` tree, a generated file, a classmap directory,
+     * the package's own tests and a bundled `vendor` directory that is
+     * not the first segment are all its evidence and all readable.
      *
      * @return iterable<string, array{string}>
      */
@@ -145,14 +149,42 @@ final class PackageSourceReaderTest extends TestCase
         yield 'package manifest' => ['composer.json'];
         yield 'readme' => ['README.md'];
         yield 'nested source' => ['src/Http/Controller.php'];
+        yield 'a root-mapped class beside the manifest' => ['AmpHttpClient.php'];
+        yield 'a lib tree' => ['lib/Client.php'];
+        yield 'a generated file' => ['generated/Metadata.php'];
+        yield 'a classmap directory' => ['classes/Legacy.php'];
+        yield 'the package\'s own tests' => ['tests/ClientTest.php'];
+        yield 'an ordinary root file that is not one of the two' => ['phpunit.xml'];
+        yield 'a vendor directory that is not the first segment' => ['src/vendor/Bundled.php'];
     }
 
     #[DataProvider('admittedPathProvider')]
-    public function test_every_admitted_location_can_be_read(string $path): void
+    public function test_every_layout_a_package_keeps_its_content_in_can_be_read(string $path): void
     {
         $this->write($path, "body\n");
 
         self::assertSame("body\n", $this->read($path, 1, 200)->body['content']);
+    }
+
+    /**
+     * The gap a fixed location list left. `symfony/http-client` maps its
+     * namespace to `""`, so the installed production class the evidence
+     * is in sits at the package root — the exact shape that was
+     * unreadable. A window and a search both reach it now.
+     */
+    public function test_a_root_mapped_production_class_is_read_and_searched(): void
+    {
+        $this->write('composer.json', '{"autoload":{"psr-4":{"Symfony\\\\Component\\\\HttpClient\\\\":""}}}' . "\n");
+        $this->write('AmpHttpClient.php', "<?php\n\nfinal class AmpHttpClient\n{\n}\n");
+
+        self::assertSame(
+            "<?php\n\nfinal class AmpHttpClient\n{\n}\n",
+            $this->read('AmpHttpClient.php', 1, 200)->body['content'],
+        );
+        self::assertSame(
+            [['line' => 3, 'content' => 'final class AmpHttpClient']],
+            $this->search('AmpHttpClient.php', 'final class', 1)->body['matches'],
+        );
     }
 
     /**
@@ -185,13 +217,14 @@ final class PackageSourceReaderTest extends TestCase
      * The vendor a package belongs to is not what admits it, and it
      * decides nothing else either. An exact installed dependency
      * outside `kinetis/` — the source a Kinetis behavior can turn on —
-     * is read under the same five locations, refused outside them, and
+     * is read under the same install root, refused outside it, and
      * reported in the same shape.
      */
-    public function test_a_package_outside_the_kinetis_vendor_is_read_under_the_same_locations(): void
+    public function test_a_package_outside_the_kinetis_vendor_is_read_under_the_same_root(): void
     {
         $this->write('src/A.php', "one\n");
         $this->write('tests/ATest.php', "two\n");
+        $this->write('vendor/private/Secret.php', "three\n");
 
         $reader = new PackageSourceReader(new InstalledPackages([
             new PackageFact('thesis/amqp', '0.9.1', $this->root),
@@ -204,7 +237,11 @@ final class PackageSourceReaderTest extends TestCase
         self::assertSame('0.9.1', $document->body['version']);
         self::assertSame("one\n", $document->body['content']);
 
-        self::assertRefusal('path_not_admitted', $reader->read('thesis/amqp', 'tests/ATest.php', 1, 200));
+        self::assertSame("two\n", $reader->read('thesis/amqp', 'tests/ATest.php', 1, 200)->body['content']);
+        self::assertRefusal(
+            'path_not_admitted',
+            $reader->read('thesis/amqp', 'vendor/private/Secret.php', 1, 200),
+        );
     }
 
     /**
@@ -230,22 +267,36 @@ final class PackageSourceReaderTest extends TestCase
     {
         yield 'empty' => [''];
         yield 'absolute' => ['/etc/passwd'];
-        yield 'leading slash on an admitted directory' => ['/src/A.php'];
+        yield 'leading slash on an ordinary directory' => ['/src/A.php'];
         yield 'parent segment' => ['src/../../secret'];
         yield 'trailing parent segment' => ['src/..'];
         yield 'current segment' => ['src/./A.php'];
+        yield 'the root token, which only a listing takes' => ['.'];
         yield 'doubled separator' => ['src//A.php'];
         yield 'trailing separator' => ['src/'];
         yield 'backslash separator' => ['src\\A.php'];
         yield 'NUL byte' => ["src/A.php\0.txt"];
-        yield 'unadmitted root file' => ['phpunit.xml'];
-        yield 'unadmitted directory' => ['tests/ATest.php'];
-        yield 'directory prefix only' => ['srcx/A.php'];
+        yield 'hidden root file' => ['.env'];
+        yield 'file under a hidden root directory' => ['.git/config'];
+        yield 'nested hidden directory' => ['src/.hidden/Secret.php'];
+        yield 'hidden file in an ordinary directory' => ['src/.env'];
+        yield 'the package\'s own vendor tree' => ['vendor/private/Secret.php'];
+        yield 'the vendor directory itself' => ['vendor'];
     }
 
+    /**
+     * Each refused path is also put on disk wherever one can be, so what
+     * the refusal proves is the syntax rule rather than a missing file.
+     */
     #[DataProvider('inadmissiblePathProvider')]
-    public function test_a_path_outside_the_admitted_syntax_or_locations_is_refused(string $path): void
+    public function test_a_path_outside_the_admitted_syntax_is_refused(string $path): void
     {
+        $this->write('.env', "secret body\n");
+        $this->write('.git/config', "secret body\n");
+        $this->write('src/.hidden/Secret.php', "secret body\n");
+        $this->write('src/.env', "secret body\n");
+        $this->write('vendor/private/Secret.php', "secret body\n");
+
         self::assertRefusal('path_not_admitted', $this->read($path, 1, 200));
     }
 
@@ -264,10 +315,10 @@ final class PackageSourceReaderTest extends TestCase
     }
 
     /**
-     * A directory is an admitted location for the listing, so a read of
-     * one reaches the regular-file check rather than being turned away
-     * as an unadmitted path: the refusal says the target is not a file,
-     * which is what it is.
+     * A directory name is admitted syntax, so a read of one reaches the
+     * regular-file check rather than being turned away as an unadmitted
+     * path: the refusal says the target is not a file, which is what it
+     * is.
      */
     public function test_a_directory_is_not_a_readable_source_file(): void
     {
@@ -298,41 +349,71 @@ final class PackageSourceReaderTest extends TestCase
     }
 
     /**
-     * A symlink resolving inside the same admitted location is an
-     * ordinary file: the refusals around it are about where the target
-     * landed, not about links.
+     * A symlink resolving anywhere the package serves is an ordinary
+     * file, one crossing from `src` to a root file included: the
+     * refusals around links are about where the target landed, not
+     * about links.
      */
-    public function test_a_symlink_staying_in_the_same_admitted_location_is_read(): void
+    public function test_a_symlink_staying_inside_the_package_is_read(): void
     {
         $this->write('src/A.php', "inside\n");
         $this->write('src/Http/Controller.php', "nested\n");
+        $this->write('README.md', "readme\n");
 
         $this->link('src/B.php', 'src/A.php');
         $this->link('src/Http/Alias.php', 'src/Http/Controller.php');
         $this->link('src/C.php', 'src/Http/Controller.php');
+        $this->link('src/Readme.md', 'README.md');
 
         self::assertSame("inside\n", $this->read('src/B.php', 1, 200)->body['content']);
         self::assertSame("nested\n", $this->read('src/Http/Alias.php', 1, 200)->body['content']);
         self::assertSame("nested\n", $this->read('src/C.php', 1, 200)->body['content']);
+        self::assertSame("readme\n", $this->read('src/Readme.md', 1, 200)->body['content']);
     }
 
     /**
-     * Where an admitted path may point, and where a symlink under one
-     * may not: the request's admitted location is the boundary, so a
-     * link out of it reads something this tool does not serve however
-     * admitted its own name was.
+     * The boundary is the install root plus a separator, not a string
+     * prefix, so a sibling root whose name merely starts with it is
+     * outside the package.
+     *
+     * @throws JsonException
+     */
+    public function test_a_sibling_root_sharing_a_name_prefix_stays_outside(): void
+    {
+        $sibling = $this->root . '-extra';
+
+        if (!mkdir($sibling, 0o700)) {
+            throw new RuntimeException("Could not create the sibling root {$sibling}.");
+        }
+
+        file_put_contents($sibling . '/Secret.php', "secret body\n");
+        symlink($sibling . '/Secret.php', $this->root . '/Reach.php');
+
+        $document = $this->read('Reach.php', 1, 200);
+
+        self::delete($sibling);
+
+        self::assertRefusal('source_unreadable', $document);
+        self::assertStringNotContainsString('secret body', $document->toJson());
+    }
+
+    /**
+     * Where a symlink under an admitted name may not land: the syntax
+     * rule is applied again to the path the link resolved to, so a link
+     * reaching a hidden name or the package's own vendor tree reads
+     * something this tool does not serve however ordinary its own name
+     * was.
      *
      * @return iterable<string, array{string, string}>
      */
     public static function escapingLinkProvider(): iterable
     {
-        yield 'a source path reaching the readme' => ['src/Link.php', 'README.md'];
-        yield 'a source path reaching the manifest' => ['src/Link.php', 'composer.json'];
-        yield 'a source path reaching the test suite' => ['src/Link.php', 'tests/SecretTest.php'];
+        yield 'a source path reaching a hidden root file' => ['src/Link.php', '.env'];
+        yield 'a source path reaching a hidden root directory' => ['src/Link.php', '.git/config'];
+        yield 'a source path reaching a nested hidden directory' => ['src/Link.php', 'src/.hidden/Secret.php'];
         yield 'a source path reaching the vendor tree' => ['src/Link.php', 'vendor/private/Secret.php'];
-        yield 'a source path reaching an unadmitted root file' => ['src/Link.php', 'phpunit.xml'];
-        yield 'a readme reaching the source tree' => ['README.md', 'src/A.php'];
-        yield 'a binary reaching the source tree' => ['bin/tool', 'src/A.php'];
+        yield 'a root file reaching the vendor tree' => ['Client.php', 'vendor/private/Secret.php'];
+        yield 'a readme reaching a hidden root file' => ['README.md', '.env'];
     }
 
     /**
@@ -340,7 +421,7 @@ final class PackageSourceReaderTest extends TestCase
      * @param string $target where the link behind it resolves, inside the package
      */
     #[DataProvider('escapingLinkProvider')]
-    public function test_a_symlink_leaving_its_admitted_location_is_refused(string $path, string $target): void
+    public function test_a_symlink_reaching_an_unserved_name_is_refused(string $path, string $target): void
     {
         $this->write($target, "secret body\n");
         $this->write('src/A.php', "source\n");
@@ -684,12 +765,13 @@ final class PackageSourceReaderTest extends TestCase
         $this->write('src/Http/Controller.php', "secret body\n");
         $this->write('src/Big.php', str_repeat('a', PackageSourceReader::MAX_SOURCE_BYTES + 1));
         $this->write('src/Binary.php', "\0");
-        $this->link('src/Link.php', 'README.md');
-        $this->write('README.md', "secret body\n");
+        $this->write('.env', "secret body\n");
+        $this->write('vendor/private/Secret.php', "secret body\n");
+        $this->link('src/Link.php', '.env');
 
         $refusals = [
             'package_unknown' => $this->reader()->search('kinetis/absent', 'src/A.php', 'secret', 1),
-            'path_not_admitted' => $this->search('tests/ATest.php', 'secret', 1),
+            'path_not_admitted' => $this->search('vendor/private/Secret.php', 'secret', 1),
             'source_missing' => $this->search('src/Absent.php', 'secret', 1),
             'source_unreadable' => $this->search('src/Http', 'secret', 1),
             'source_oversize' => $this->search('src/Big.php', 'a', 1),
@@ -707,8 +789,8 @@ final class PackageSourceReaderTest extends TestCase
             self::assertStringNotContainsString('secret body', $json);
         }
 
-        // A symlink out of its admitted location is refused on the
-        // search path too, and the file it reached is not searched.
+        // A symlink onto an unserved name is refused on the search path
+        // too, and the file it reached is not searched.
         $escaped = $this->search('src/Link.php', 'secret', 1);
 
         self::assertRefusal('path_not_admitted', $escaped);
@@ -797,7 +879,8 @@ final class PackageSourceReaderTest extends TestCase
     }
 
     /**
-     * The three directories, each listable by its bare name.
+     * Any directory a package keeps its own content in, each listable by
+     * its bare name.
      *
      * @return iterable<string, array{string}>
      */
@@ -806,10 +889,13 @@ final class PackageSourceReaderTest extends TestCase
         yield 'source' => ['src'];
         yield 'binaries' => ['bin'];
         yield 'resources' => ['resources'];
+        yield 'a lib tree' => ['lib'];
+        yield 'generated output' => ['generated'];
+        yield 'the package\'s own tests' => ['tests'];
     }
 
     #[DataProvider('listableDirectoryProvider')]
-    public function test_every_listable_location_is_reached_by_its_bare_name(string $path): void
+    public function test_every_directory_of_the_package_is_reached_by_its_bare_name(string $path): void
     {
         $this->write($path . '/A.php', "body\n");
 
@@ -817,37 +903,83 @@ final class PackageSourceReaderTest extends TestCase
     }
 
     /**
-     * A listing names a directory this tool serves. The package root and
-     * the two readable root files are not listable, and neither is any
-     * location outside the three directories — however readable a file
-     * under one of them happens to be.
+     * A listing names a directory under the package root, or the root
+     * itself with the one literal `.`. Everything else the read syntax
+     * refuses a listing refuses too — `.` included the moment it is a
+     * segment rather than the whole path.
      *
      * @return iterable<string, array{string}>
      */
     public static function unlistablePathProvider(): iterable
     {
-        yield 'package manifest' => ['composer.json'];
-        yield 'readme' => ['README.md'];
-        yield 'package root' => ['.'];
         yield 'empty' => [''];
         yield 'absolute' => ['/etc'];
         yield 'trailing separator' => ['src/'];
         yield 'parent segment' => ['src/../..'];
-        yield 'unadmitted directory' => ['tests'];
-        yield 'unadmitted nested directory' => ['tests/Http'];
-        yield 'directory prefix only' => ['srcx'];
+        yield 'the root token as a segment' => ['./src'];
+        yield 'the parent of the package root' => ['..'];
         yield 'backslash separator' => ['src\\Http'];
         yield 'NUL byte' => ["src\0"];
+        yield 'hidden root directory' => ['.git'];
+        yield 'nested hidden directory' => ['src/.hidden'];
+        yield 'the package\'s own vendor tree' => ['vendor'];
+        yield 'a directory inside the vendor tree' => ['vendor/private'];
     }
 
     #[DataProvider('unlistablePathProvider')]
-    public function test_a_path_outside_the_listable_locations_is_refused(string $path): void
+    public function test_a_path_outside_the_listable_syntax_is_refused(string $path): void
+    {
+        $this->write('.git/config', "secret body\n");
+        $this->write('src/.hidden/Secret.php', "secret body\n");
+        $this->write('vendor/private/Secret.php', "secret body\n");
+
+        self::assertRefusal('path_not_admitted', $this->listing($path));
+    }
+
+    /**
+     * `.` is the one path that names the package root, and it is where a
+     * caller starts when the layout is unknown. What it reports is the
+     * root's own content: the hidden entries and the package's own
+     * top-level `vendor` tree are absent, because a listing offers only
+     * names a read may name.
+     */
+    public function test_the_root_token_lists_the_package_root_without_hidden_or_vendor_entries(): void
     {
         $this->write('composer.json', "{}\n");
         $this->write('README.md', "body\n");
-        $this->write('tests/Http/ATest.php', "body\n");
+        $this->write('AmpHttpClient.php', "<?php\n");
+        $this->write('lib/Client.php', "<?php\n");
+        $this->write('.env', "secret body\n");
+        $this->write('.git/config', "secret body\n");
+        $this->write('vendor/private/Secret.php', "secret body\n");
 
-        self::assertRefusal('path_not_admitted', $this->listing($path));
+        self::assertSame([
+            ['name' => 'AmpHttpClient.php', 'type' => 'file'],
+            ['name' => 'README.md', 'type' => 'file'],
+            ['name' => 'composer.json', 'type' => 'file'],
+            ['name' => 'lib', 'type' => 'directory'],
+            ['name' => 'src', 'type' => 'directory'],
+        ], $this->listing('.')->body['entries']);
+    }
+
+    /**
+     * The `vendor` rule is about the first segment alone: a directory of
+     * that name deeper inside is the package's own bundled content, so
+     * it is listed, listable and readable through.
+     */
+    public function test_a_vendor_directory_below_the_first_segment_is_the_package_s_own_content(): void
+    {
+        $this->write('src/vendor/Bundled.php', "bundled\n");
+
+        self::assertSame(
+            [['name' => 'vendor', 'type' => 'directory']],
+            $this->listing('src')->body['entries'],
+        );
+        self::assertSame(
+            [['name' => 'Bundled.php', 'type' => 'file']],
+            $this->listing('src/vendor')->body['entries'],
+        );
+        self::assertSame("bundled\n", $this->read('src/vendor/Bundled.php', 1, 200)->body['content']);
     }
 
     public function test_an_uninstalled_package_is_refused_before_a_directory_is_opened(): void
@@ -868,30 +1000,43 @@ final class PackageSourceReaderTest extends TestCase
     public function test_an_admitted_path_behind_a_regular_file_is_not_a_directory(): void
     {
         $this->write('src/A.php', "body\n");
+        $this->write('composer.json', "{}\n");
 
         self::assertRefusal('source_not_directory', $this->listing('src/A.php'));
+
+        // A root file is ordinary readable content now, so naming one in
+        // a listing is the wrong kind of thing rather than an unserved
+        // path.
+        self::assertRefusal('source_not_directory', $this->listing('composer.json'));
     }
 
     /**
      * A listing offers only what a read of the same name could reach:
-     * every child is resolved and re-admitted first, so a link out of
-     * the package, a link into a location this tool does not serve, a
-     * dangling one and a special file are absent rather than named. A
-     * link that stays inside is an ordinary entry, reported as what it
-     * resolves to and usable through that same name.
+     * every child is admitted by its own name and again by the target it
+     * resolves to, so a hidden entry, a link out of the package, a link
+     * onto a hidden name or into the vendor tree, a dangling one and a
+     * special file are absent rather than named. A link that stays
+     * inside is an ordinary entry, reported as what it resolves to and
+     * usable through that same name.
+     *
+     * @throws JsonException
      */
-    public function test_only_children_resolving_inside_the_same_location_are_listed(): void
+    public function test_only_children_a_read_could_reach_are_listed(): void
     {
         $outside = sys_get_temp_dir() . '/orbitron-outside-' . bin2hex(random_bytes(8));
         file_put_contents($outside, "secret body\n");
 
-        $this->write('README.md', "secret body\n");
+        $this->write('.env', "secret body\n");
+        $this->write('vendor/private/Secret.php', "secret body\n");
         $this->write('src/Real.php', "real\n");
         $this->write('src/Http/Controller.php', "nested\n");
+        $this->write('src/.hidden/Secret.php', "secret body\n");
 
         $this->link('src/Inside.php', 'src/Real.php');
         $this->link('src/Directory', 'src/Http');
-        $this->link('src/Readme.md', 'README.md');
+        $this->link('src/Hidden.php', '.env');
+        $this->link('src/Vendored.php', 'vendor/private/Secret.php');
+        $this->link('src/.Link.php', 'src/Real.php');
         symlink($outside, $this->root . '/src/Escape.php');
         symlink($this->root . '/src/Gone.php', $this->root . '/src/Dangling.php');
         self::assertTrue(posix_mkfifo($this->root . '/src/pipe', 0o600));
@@ -906,6 +1051,7 @@ final class PackageSourceReaderTest extends TestCase
             ['name' => 'Inside.php', 'type' => 'file'],
             ['name' => 'Real.php', 'type' => 'file'],
         ], $document->body['entries']);
+        self::assertStringNotContainsString('secret body', $document->toJson());
 
         // What a listing named stays reachable through the same
         // resolution policy that admitted it.
@@ -942,8 +1088,9 @@ final class PackageSourceReaderTest extends TestCase
     {
         $this->fill(PackageSourceReader::MAX_ENTRY_COUNT);
 
-        $this->write('README.md', "secret body\n");
-        $this->link('src/Readme.md', 'README.md');
+        $this->write('.env', "secret body\n");
+        $this->write('src/.hidden.php', "secret body\n");
+        $this->link('src/Hidden.php', '.env');
         symlink($this->root . '/src/Gone.php', $this->root . '/src/Dangling.php');
 
         $document = $this->listing('src');
@@ -981,10 +1128,11 @@ final class PackageSourceReaderTest extends TestCase
     {
         $this->write('src/Http/secret body.php', "one\n");
         $this->write('src/A.php', "one\n");
+        $this->write('vendor/secret body.php', "one\n");
 
         $refusals = [
             'package_unknown' => $this->reader()->list('kinetis/absent', 'src'),
-            'path_not_admitted' => $this->listing('tests'),
+            'path_not_admitted' => $this->listing('vendor'),
             'source_missing' => $this->listing('src/Absent'),
             'source_not_directory' => $this->listing('src/A.php'),
         ];
