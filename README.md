@@ -72,10 +72,10 @@ command may change, the launcher behavior below, and the installed
 `kinetis/*` package facts. `--format` accepts `markdown` (the default)
 and `json`; both render the same document from the same facts.
 
-The workflow it prints ends with the rule that keeps an agent's evidence
-honest: run any test or command that mutates a shared database, broker
-or object store one at a time. Two overlapping runs mutate the same
-state and report failures the code does not have.
+The workflow routes four review checks to their authoritative guides:
+concrete-client failure vocabularies, terminal queue failures,
+transport-specific MCP identity, and serialization of probes that mutate
+shared state.
 
 ## `orbitron:inspect`
 
