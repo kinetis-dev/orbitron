@@ -101,7 +101,7 @@ named `orbitron`; it takes no argument and needs no environment.
 | `orbitron_inspect`, `orbitron_verify` | The two read-only documents above, as tool calls. |
 | `orbitron_scaffold_plan`, `orbitron_scaffold_apply` | The scaffold preview, and the one tool that writes. |
 | `orbitron_read_package_source`, `orbitron_search_package_source`, `orbitron_list_package_source` | A bounded window, a literal search, and a directory listing of one real installed, non-root package's own source — any package this project installed, not only `kinetis/*`. |
-| `kinetis_read_doc`, `kinetis://docs/<page>` | The Kinetis documentation, as bounded windows and whole pages — composed from [`kinetis/mcp-docs`](https://kinetis.dev/docs/mcp-docs.html), the one operation that reaches the network. |
+| `kinetis_read_doc`, `kinetis_search_doc`, `kinetis://docs/<page>` | The Kinetis documentation, as bounded windows, a literal search of one page, and whole pages — composed from [`kinetis/mcp-docs`](https://kinetis.dev/docs/mcp-docs.html), the one operation that reaches the network. |
 | `kinetis://orbitron/context` | The `orbitron:context` document. |
 
 ## Documentation

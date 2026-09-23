@@ -91,6 +91,7 @@ final class OrbitronMcpBinaryTest extends TestCase
                 OrbitronMcpApplication::SEARCH_TOOL,
                 OrbitronMcpApplication::LIST_TOOL,
                 DocsApplication::READ_TOOL,
+                DocsApplication::SEARCH_TOOL,
             ],
             array_column($frames[1]['result']['tools'], 'name'),
         );

@@ -156,6 +156,7 @@ final class ContextTest extends TestCase
                 'orbitron_search_package_source',
                 'orbitron_list_package_source',
                 DocsApplication::READ_TOOL,
+                DocsApplication::SEARCH_TOOL,
             ],
             array_column($document['mcp']['tools'], 'name'),
         );
@@ -200,12 +201,13 @@ final class ContextTest extends TestCase
     }
 
     /**
-     * The documentation window is stated as what it is: a page read with
-     * its own continuation rule and refusal codes, owned by
-     * kinetis/mcp-docs, and the one tool that leaves this machine. The
-     * document must not go on claiming that only a resource read does.
+     * The documentation window and search are stated as what they are:
+     * page reads with their own continuation rules and refusal codes,
+     * owned by kinetis/mcp-docs, and the two tools that leave this
+     * machine. The document must not go on claiming that only a resource
+     * read does.
      */
-    public function test_the_mcp_tools_include_the_documentation_window(): void
+    public function test_the_mcp_tools_include_the_documentation_window_and_search(): void
     {
         $document = self::context()->toArray();
         $effects = array_column($document['mcp']['tools'], 'effect', 'name');
@@ -219,9 +221,18 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('line_out_of_range', $window);
         self::assertStringContainsString('kinetis/mcp-docs', $window);
 
+        $search = $effects[DocsApplication::SEARCH_TOOL];
+
+        self::assertStringContainsString('query', $search);
+        self::assertStringContainsString('matches', $search);
+        self::assertStringContainsString('last reported line plus one', $search);
+        self::assertStringContainsString('never the catalogue', $search);
+        self::assertStringContainsString('kinetis/mcp-docs', $search);
+
         $limits = implode("\n", $document['harness']['limits']);
 
         self::assertStringContainsString(DocsApplication::READ_TOOL, $limits);
+        self::assertStringContainsString(DocsApplication::SEARCH_TOOL, $limits);
         self::assertStringNotContainsString(
             'Reading a `kinetis://docs/*` resource is the one operation',
             $limits,
@@ -304,6 +315,10 @@ final class ContextTest extends TestCase
             $workflow,
         );
         self::assertStringContainsString('any further read must answer a named unknown', $workflow);
+        self::assertStringContainsString(
+            'To locate a named unknown in a page you already know, call ' . DocsApplication::SEARCH_TOOL,
+            $workflow,
+        );
         self::assertStringNotContainsString('too long to take whole', $workflow);
     }
 

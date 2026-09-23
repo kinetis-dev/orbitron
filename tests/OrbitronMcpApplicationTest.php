@@ -50,6 +50,7 @@ final class OrbitronMcpApplicationTest extends TestCase
         OrbitronMcpApplication::SEARCH_TOOL,
         OrbitronMcpApplication::LIST_TOOL,
         DocsApplication::READ_TOOL,
+        DocsApplication::SEARCH_TOOL,
     ];
 
     /** The one package the fixture project installs beyond Orbitron and the framework. */
@@ -123,7 +124,12 @@ final class OrbitronMcpApplicationTest extends TestCase
             $instructions,
         );
         self::assertStringContainsString(
-            'read it whole as a resource when the complete page is what you need',
+            'To locate a named unknown in a known page, call ' . DocsApplication::SEARCH_TOOL
+            . ' with that URI and the literal term, then read a window around a line it reports.',
+            $instructions,
+        );
+        self::assertStringContainsString(
+            'Read a page whole as a resource when the complete page is what you need',
             $instructions,
         );
         self::assertStringNotContainsString('more than the client can take at once', $instructions);
@@ -286,14 +292,16 @@ final class OrbitronMcpApplicationTest extends TestCase
             'openWorldHint' => false,
         ], $annotations['orbitron_scaffold_apply']);
 
-        // The one tool that reaches the network, and the only one whose
+        // The two tools that reach the network, and the only ones whose
         // annotations this package does not author.
-        self::assertSame([
-            'readOnlyHint' => true,
-            'destructiveHint' => false,
-            'idempotentHint' => true,
-            'openWorldHint' => true,
-        ], $annotations[DocsApplication::READ_TOOL]);
+        foreach ([DocsApplication::READ_TOOL, DocsApplication::SEARCH_TOOL] as $name) {
+            self::assertSame([
+                'readOnlyHint' => true,
+                'destructiveHint' => false,
+                'idempotentHint' => true,
+                'openWorldHint' => true,
+            ], $annotations[$name], $name);
+        }
     }
 
     public function test_the_context_resource_is_the_markdown_document_the_command_prints(): void
@@ -416,21 +424,24 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The documentation window reaches the wire exactly as
-     * kinetis/mcp-docs authors it. Nothing about the tool — its name,
-     * what it tells a model, or the schema a client validates against —
-     * is restated in this package, so a client cannot be given two
-     * accounts of one tool.
+     * The documentation window and search reach the wire exactly as
+     * kinetis/mcp-docs authors them. Nothing about either tool — its
+     * name, what it tells a model, or the schema a client validates
+     * against — is restated in this package, so a client cannot be given
+     * two accounts of one tool.
      */
-    public function test_the_documentation_window_tool_is_published_as_the_documentation_server_authors_it(): void
+    public function test_the_documentation_tools_are_published_as_the_documentation_server_authors_them(): void
     {
         $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
-        $published = $tools[7];
-        $authored = DocsApplication::readTool();
+        $published = array_slice($tools, 7);
 
-        self::assertSame($authored->name, $published['name']);
-        self::assertSame($authored->description, $published['description']);
-        self::assertSame($authored->inputSchema, $published['inputSchema']);
+        self::assertCount(2, $published);
+
+        foreach ([DocsApplication::readTool(), DocsApplication::searchTool()] as $index => $authored) {
+            self::assertSame($authored->name, $published[$index]['name']);
+            self::assertSame($authored->description, $published[$index]['description']);
+            self::assertSame($authored->inputSchema, $published[$index]['inputSchema']);
+        }
     }
 
     /**
@@ -456,6 +467,63 @@ final class OrbitronMcpApplicationTest extends TestCase
             'content' => "second\n",
         ], $document);
         self::assertSame([['GET', DocsCatalogue::SOURCE_BASE_URL . 'appendix.md']], $this->requests);
+    }
+
+    /**
+     * A search call is handed over whole as well: the frame a client
+     * reads is byte for byte what kinetis/mcp-docs answers the same
+     * call with directly, over the same page and catalogue URL.
+     */
+    public function test_a_documentation_search_call_is_delegated_and_returns_the_documentation_servers_answer(): void
+    {
+        $page = "first Needle\r\nneedle\nlast Needle";
+        $arguments = '{"uri":"kinetis://docs/appendix","query":"Needle","startLine":1}';
+        $this->responses = [new MockResponse($page)];
+
+        $frame = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . DocsApplication::SEARCH_TOOL
+            . '","arguments":' . $arguments . '}}',
+        ])[0];
+
+        self::assertSame([
+            'status' => 'ok',
+            'uri' => 'kinetis://docs/appendix',
+            'query' => 'Needle',
+            'startLine' => 1,
+            'matches' => [
+                ['line' => 1, 'content' => 'first Needle'],
+                ['line' => 3, 'content' => 'last Needle'],
+            ],
+            'hasMore' => false,
+        ], self::document($frame));
+        self::assertSame([['GET', DocsCatalogue::SOURCE_BASE_URL . 'appendix.md']], $this->requests);
+
+        $this->responses = [new MockResponse($page)];
+        $direct = $this->docs()->callTool(
+            DocsApplication::SEARCH_TOOL,
+            json_decode($arguments, flags: JSON_THROW_ON_ERROR),
+            new ProgressEmitter(),
+            null,
+        );
+
+        self::assertSame($direct->text, $frame['result']['content'][0]['text']);
+    }
+
+    /**
+     * The search's arguments are validated by the package that publishes
+     * its schema, not re-read here: the window's own `lineCount` is as
+     * unknown to it as any other member, and nothing is fetched.
+     */
+    public function test_a_documentation_search_argument_outside_the_schema_is_refused_before_any_fetch(): void
+    {
+        $frame = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . DocsApplication::SEARCH_TOOL
+            . '","arguments":{"uri":"kinetis://docs/index","query":"x","lineCount":5}}}',
+        ])[0];
+
+        self::assertSame(-32602, $frame['error']['code']);
+        self::assertStringContainsString('"lineCount"', $frame['error']['message']);
+        self::assertSame([], $this->requests);
     }
 
     /**

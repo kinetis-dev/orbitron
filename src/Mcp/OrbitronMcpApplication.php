@@ -23,19 +23,19 @@ use stdClass;
 
 /**
  * Orbitron's four documents, one installed-source window, one
- * installed-source search, one installed-source directory listing and
- * the documentation window as MCP tools, and its context document plus
- * the Kinetis documentation as MCP resources, over the shared protocol
- * server. One connection is the whole project-local surface an agent
- * needs: there is no second server to register.
+ * installed-source search, one installed-source directory listing, and
+ * the documentation window and search as MCP tools, and its context
+ * document plus the Kinetis documentation as MCP resources, over the
+ * shared protocol server. One connection is the whole project-local
+ * surface an agent needs: there is no second server to register.
  *
  * Every document tool call reaches {@see Documents}, the same service
  * the CLI commands adapt: no command is invoked, no output is parsed,
  * and no envelope is built twice. Every `kinetis://docs/*` read, and
- * every call to the documentation window, reaches the
+ * every call to the documentation window or search, reaches the
  * {@see DocsApplication} this object was handed, which owns the fixed
- * catalogue, the bounded fetch, and that tool's description, schema and
- * validation alike. kinetis/mcp-docs remains the framework-agnostic
+ * catalogue, the bounded fetch, and those tools' descriptions, schemas
+ * and validation alike. kinetis/mcp-docs remains the framework-agnostic
  * owner of all of it and is installable on its own; none of it is
  * copied here.
  *
@@ -44,8 +44,8 @@ use stdClass;
  * and the source reader are created for one operation and discarded
  * with its response. No MCP message can name a source body, a URL, an
  * origin, a ref, a template, a command or the inventory path: four tools
- * take no argument at all, a resource read and the documentation window
- * each select one entry of a fixed catalogue whose URLs are the
+ * take no argument at all, a resource read and the two documentation
+ * tools each select one entry of a fixed catalogue whose URLs are the
  * documentation server's own constants, and the three that take a path
  * admit it only as a relative name under one installed package: each
  * schema is validated here in full before the package lookup, and the
@@ -58,9 +58,9 @@ use stdClass;
  * the whole mutation request, which is why it has no boolean to set: the
  * MCP client's configured approval policy controls whether it runs, and
  * the local process and filesystem permissions remain the authority
- * boundary for it. Reading a documentation page, as a window or as a
- * resource, is the one operation that leaves this machine, over HTTPS to
- * that fixed origin.
+ * boundary for it. Reading a documentation page, as a window, a search or
+ * a resource, is the one operation that leaves this machine, over HTTPS
+ * to that fixed origin.
  *
  * Orbitron does not boot the Kinetis application here, so nothing about
  * running this server registers a route, a listener or a bootstrap.
@@ -87,7 +87,9 @@ final readonly class OrbitronMcpApplication implements McpApplication
         . 'read ' . self::DOCS_ENTRY_URI . ' and route the task through the pages it names — read them instead of '
         . 'answering about Kinetis from memory. Read a page by calling ' . DocsApplication::READ_TOOL . ' with its '
         . 'URI from line 1 and continuing from the line it reports, only while the section you were routed to or a '
-        . 'named unknown is unresolved; read it whole as a resource when the complete page is what you need. '
+        . 'named unknown is unresolved. To locate a named unknown in a known page, call '
+        . DocsApplication::SEARCH_TOOL . ' with that URI and the literal term, then read a window around a line '
+        . 'it reports. Read a page whole as a resource when the complete page is what you need. '
         . 'Those pages are published from main and can describe behavior newer than this project has installed, '
         . 'so the versions orbitron_inspect reports and the installed source stay '
         . 'the authority for anything version-sensitive. A completed composer require or remove is visible to the '
@@ -312,11 +314,12 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 ],
                 self::readOnly(),
             ),
-            // Published exactly as kinetis/mcp-docs authors it — name,
-            // description, schema and annotations — and every call to it
-            // is handed back to that application below. Restating any of
-            // it here would give a client two accounts of one tool.
+            // Published exactly as kinetis/mcp-docs authors them — name,
+            // description, schema and annotations — and every call to
+            // either is handed back to that application below. Restating
+            // any of it here would give a client two accounts of one tool.
             DocsApplication::readTool(),
+            DocsApplication::searchTool(),
         ];
     }
 
@@ -375,10 +378,11 @@ final readonly class OrbitronMcpApplication implements McpApplication
             return self::result($reader->list($package, $path));
         }
 
-        // The documentation window is the documentation server's own
-        // tool: its schema, its validation, its catalogue and its fetch.
-        // Nothing about the call is read or rewritten on the way through.
-        if ($name === DocsApplication::READ_TOOL) {
+        // The documentation window and search are the documentation
+        // server's own tools: their schemas, their validation, its
+        // catalogue and its fetch. Nothing about the call is read or
+        // rewritten on the way through.
+        if ($name === DocsApplication::READ_TOOL || $name === DocsApplication::SEARCH_TOOL) {
             return $this->docs->callTool($name, $arguments, $progress, $context);
         }
 
@@ -583,9 +587,9 @@ final readonly class OrbitronMcpApplication implements McpApplication
      * Closed-world because these tools' whole read set is this project's
      * own Composer metadata and manifest, and the installed source
      * beneath the roots that metadata names: no network, no database, no
-     * other system to reach. The documentation window is the one tool
-     * that leaves this machine, and kinetis/mcp-docs annotates it
-     * open-world itself.
+     * other system to reach. The documentation window and search are the
+     * only tools that leave this machine, and kinetis/mcp-docs annotates
+     * them open-world itself.
      */
     private static function readOnly(): ToolAnnotations
     {
