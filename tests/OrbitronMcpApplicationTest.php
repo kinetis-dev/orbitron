@@ -135,6 +135,32 @@ final class OrbitronMcpApplicationTest extends TestCase
         self::assertStringNotContainsString('more than the client can take at once', $instructions);
     }
 
+    /**
+     * The server cannot follow an agent into another checkout, so the
+     * instructions keep application work in the one it was launched
+     * from and name the inventory comparison that detects a mismatch.
+     */
+    public function test_the_instructions_bind_the_session_to_its_launch_checkout(): void
+    {
+        $instructions = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":'
+            . '"2025-06-18","capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}'])[0]
+            ['result']['instructions'];
+
+        self::assertStringContainsString(
+            'do not switch to or create another checkout or worktree for application work',
+            $instructions,
+        );
+        self::assertStringContainsString(
+            'end the session, launch the client from that checkout, and repeat context, inspect and verify '
+            . 'before editing',
+            $instructions,
+        );
+        self::assertStringContainsString(
+            'The kinetis/* versions orbitron_inspect reports must match the active checkout\'s composer.lock.',
+            $instructions,
+        );
+    }
+
     public function test_the_document_tools_are_published_with_closed_empty_schemas(): void
     {
         $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
