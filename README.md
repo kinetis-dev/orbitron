@@ -79,7 +79,7 @@ for every file verbatim.
 
 ```console
 vendor/bin/kinetis orbitron:context   # what Orbitron is, links to the guides, installed kinetis/* versions
-vendor/bin/kinetis orbitron:inspect   # the installed kinetis/* package inventory, as JSON
+vendor/bin/kinetis orbitron:inspect   # the physical project root and installed kinetis/* inventory, as JSON
 vendor/bin/kinetis orbitron:verify    # whether this project's Composer layout is the one Orbitron supports
 vendor/bin/kinetis orbitron:scaffold  # a GET /health controller and test — preview, then --apply
 ```

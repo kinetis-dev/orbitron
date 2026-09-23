@@ -87,7 +87,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
         . 'client was launched from. Once those first calls succeed, do not switch to or create another checkout or '
         . 'worktree for application work: a different checkout is a different Orbitron project, so end the '
         . 'session, launch the client from that checkout, and repeat context, inspect and verify before editing. '
-        . 'The kinetis/* versions orbitron_inspect reports must match the active checkout\'s composer.lock. '
+        . 'The projectRoot orbitron_inspect reports must equal pwd -P in the checkout you are editing; on a '
+        . 'mismatch, stop and launch the client from the intended checkout. '
         . 'Before changing application code, '
         . 'read ' . self::DOCS_ENTRY_URI . ' and route the task through the pages it names — read them instead of '
         . 'answering about Kinetis from memory. Read a page by calling ' . DocsApplication::READ_TOOL . ' with its '
@@ -157,10 +158,7 @@ final readonly class OrbitronMcpApplication implements McpApplication
      */
     public function serverInfo(): ServerInfo
     {
-        $version = $this->documents()->inspect()->body['orbitronVersion'];
-        \assert(\is_string($version));
-
-        return new ServerInfo(self::SERVER_NAME, $version, self::INSTRUCTIONS);
+        return new ServerInfo(self::SERVER_NAME, $this->packages()->orbitronVersion(), self::INSTRUCTIONS);
     }
 
     /**
@@ -172,7 +170,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
         return [
             self::tool(
                 'orbitron_inspect',
-                'Reports the installed kinetis/* packages and their versions as a JSON document. '
+                'Reports the physical project root this server reads and its installed kinetis/* packages and '
+                . 'their versions as a JSON document. '
                 . 'Read from this project\'s Composer inventory on every call, so a completed dependency change '
                 . 'shows up here without restarting or reconnecting.',
                 self::readOnly(),
@@ -404,7 +403,7 @@ final readonly class OrbitronMcpApplication implements McpApplication
         // tool invalid, and must not turn that refusal into an internal
         // error. The selected arm takes the operation's one snapshot.
         return self::result(match ($name) {
-            'orbitron_inspect' => $this->documents()->inspect(),
+            'orbitron_inspect' => $this->documents()->inspect($this->projectRoot),
             'orbitron_verify' => $this->documents()->verify($this->projectRoot),
             'orbitron_scaffold_plan' => $this->documents()->scaffold($this->projectRoot, ScaffoldMode::Preview),
             'orbitron_scaffold_apply' => $this->documents()->scaffold($this->projectRoot, ScaffoldMode::Apply),

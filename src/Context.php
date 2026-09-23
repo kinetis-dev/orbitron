@@ -48,7 +48,7 @@ final readonly class Context
     /** @var list<string> */
     private const array WORKFLOW = [
         'Run `vendor/bin/kinetis orbitron:context` once per task to read this document.',
-        'Run `vendor/bin/kinetis orbitron:inspect` to read the installed Kinetis packages and their versions as JSON.',
+        'Run `vendor/bin/kinetis orbitron:inspect` to read the physical project root and the installed Kinetis packages and their versions as JSON. Before editing, compare its `projectRoot` with `pwd -P` in the checkout you edit; on a mismatch, stop, launch the MCP client and server from the intended checkout, and rerun context, inspect and verify.',
         'Run `vendor/bin/kinetis orbitron:verify` to read whether this project\'s Composer layout is the one Orbitron supports; exit 3 means the document reports an error.',
         'Run `vendor/bin/kinetis orbitron:scaffold` to read the health-endpoint scaffold plan, and add `--apply` to create its two files; exit 3 means the document reports a refusal or a failed write.',
         'An agent that speaks MCP can register `vendor/bin/kinetis-orbitron-mcp` instead and call the same documents as tools, with the Kinetis documentation served from that one connection — as bounded line windows through ' . DocsApplication::READ_TOOL . ', as a literal search of one page through ' . DocsApplication::SEARCH_TOOL . ', and as whole-page resources. There is no second server to configure.',
@@ -73,7 +73,7 @@ final readonly class Context
         [
             'name' => 'orbitron:inspect',
             'formats' => ['json'],
-            'effect' => 'Renders the installed kinetis/* inventory to STDOUT, under the same boundary: reads Composer\'s installed-package records and changes nothing.',
+            'effect' => 'Renders the physical project root and the installed kinetis/* inventory to STDOUT, under the same boundary: resolves the detected root, reads Composer\'s installed-package records and changes nothing.',
         ],
         [
             'name' => 'orbitron:verify',

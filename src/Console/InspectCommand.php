@@ -8,11 +8,13 @@ use JsonException;
 use Kinetis\Console\Attributes\Command;
 use Kinetis\Console\CommandArguments;
 use Kinetis\Orbitron\Documents;
+use Kinetis\Runtime\ProjectRoot;
 
 /**
- * `orbitron:inspect` — the installed `kinetis/*` inventory as one JSON
- * document on STDOUT, for an agent that reads a project's Kinetis
- * versions before reading a guide.
+ * `orbitron:inspect` — the physical project root and the installed
+ * `kinetis/*` inventory as one JSON document on STDOUT, for an agent that
+ * confirms which checkout it reads and that project's Kinetis versions
+ * before reading a guide.
  *
  * JSON is the only format: this document exists to be parsed. Omitting
  * `--format` and writing `--format=json` are the same invocation.
@@ -26,11 +28,16 @@ final readonly class InspectCommand
     private const array FORMATS = ['json'];
 
     /**
+     * $projectRootOverride is a test seam for the same reason as
+     * {@see VerifyCommand}'s, never a client-selected path: no argument of
+     * this command reaches it.
+     *
      * @param resource $output
      * @param resource $errorOutput
      */
     public function __construct(
         private Documents $documents = new Documents(),
+        private ?string $projectRootOverride = null,
         private mixed $output = STDOUT,
         private mixed $errorOutput = STDERR,
     ) {}
@@ -40,7 +47,7 @@ final readonly class InspectCommand
      */
     #[Command(
         'orbitron:inspect',
-        description: 'Prints the installed kinetis/* packages and their versions as JSON',
+        description: 'Prints the physical project root and the installed kinetis/* package versions as JSON',
         bootstrap: false,
     )]
     public function run(CommandArguments $arguments): int
@@ -54,7 +61,12 @@ final readonly class InspectCommand
             return 2;
         }
 
-        fwrite($this->output, $this->documents->inspect()->toJson());
+        // dirname(__DIR__), for the reason VerifyCommand states.
+        $document = $this->documents->inspect(
+            $this->projectRootOverride ?? ProjectRoot::detect(dirname(__DIR__)),
+        );
+
+        fwrite($this->output, $document->toJson());
 
         return 0;
     }

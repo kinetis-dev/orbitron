@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Kinetis\Orbitron\Tests;
 
 use JsonException;
+use Kinetis\Console\CommandArguments;
 use Kinetis\McpDocs\DocsApplication;
 use Kinetis\McpDocs\DocsCatalogue;
 use Kinetis\McpDocs\DocsFetcher;
@@ -12,6 +13,7 @@ use Kinetis\McpProtocol\Exception\JsonRpcException;
 use Kinetis\McpProtocol\McpServer;
 use Kinetis\McpProtocol\ProgressEmitter;
 use Kinetis\McpProtocol\StdioLoop;
+use Kinetis\Orbitron\Console\InspectCommand;
 use Kinetis\Orbitron\Documents;
 use Kinetis\Orbitron\HealthScaffold;
 use Kinetis\Orbitron\InstalledPackages;
@@ -138,7 +140,7 @@ final class OrbitronMcpApplicationTest extends TestCase
     /**
      * The server cannot follow an agent into another checkout, so the
      * instructions keep application work in the one it was launched
-     * from and name the inventory comparison that detects a mismatch.
+     * from and name the root comparison that detects a mismatch.
      */
     public function test_the_instructions_bind_the_session_to_its_launch_checkout(): void
     {
@@ -156,7 +158,8 @@ final class OrbitronMcpApplicationTest extends TestCase
             $instructions,
         );
         self::assertStringContainsString(
-            'The kinetis/* versions orbitron_inspect reports must match the active checkout\'s composer.lock.',
+            'The projectRoot orbitron_inspect reports must equal pwd -P in the checkout you are editing; on a '
+            . 'mismatch, stop and launch the client from the intended checkout.',
             $instructions,
         );
     }
@@ -595,13 +598,49 @@ final class OrbitronMcpApplicationTest extends TestCase
         ]);
 
         self::assertFalse($frames[0]['result']['isError']);
-        self::assertSame($this->documents()->inspect()->toJson(), $frames[0]['result']['content'][0]['text']);
+        self::assertSame(
+            $this->documents()->inspect($this->project->root)->toJson(),
+            $frames[0]['result']['content'][0]['text'],
+        );
 
         self::assertFalse($frames[1]['result']['isError']);
         self::assertSame(
             $this->documents()->verify($this->project->root)->toJson(),
             $frames[1]['result']['content'][0]['text'],
         );
+    }
+
+    /**
+     * Both surfaces resolve the root they were constructed with, so a
+     * server launched through a symlinked path and the command over that
+     * same path report one physical checkout in one document.
+     *
+     * @throws JsonException
+     */
+    public function test_inspect_reports_the_physical_root_the_command_reports(): void
+    {
+        $link = $this->project->root . '-link';
+        self::assertTrue(symlink($this->project->root, $link));
+
+        try {
+            $frame = self::decoded(self::session(
+                new OrbitronMcpApplication($link, $this->docs()),
+                ['{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"orbitron_inspect"}}'],
+            ))[0];
+
+            $output = new StreamCapture();
+            $errorOutput = new StreamCapture();
+            $command = new InspectCommand($this->documents(), $link, $output->stream, $errorOutput->stream);
+
+            self::assertSame(0, $command->run(CommandArguments::parse([])));
+        } finally {
+            unlink($link);
+        }
+
+        self::assertFalse($frame['result']['isError']);
+        self::assertSame($output->contents(), $frame['result']['content'][0]['text']);
+        self::assertSame(Documents::INSPECT_SCHEMA_VERSION, self::document($frame)['schemaVersion']);
+        self::assertSame(realpath($this->project->root), self::document($frame)['projectRoot']);
     }
 
     /**
@@ -746,6 +785,8 @@ final class OrbitronMcpApplicationTest extends TestCase
             . '"arguments":{"projectRoot":"/etc"}}}',
             '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"orbitron_verify",'
             . '"arguments":{"apply":true}}}',
+            '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"orbitron_inspect",'
+            . '"arguments":{"projectRoot":"/etc"}}}',
         ]);
 
         foreach ($frames as $frame) {

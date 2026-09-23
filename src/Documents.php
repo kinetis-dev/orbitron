@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Kinetis\Orbitron;
 
+use RuntimeException;
+
 /**
  * Every Orbitron document, built from the project as it is now.
  *
@@ -22,7 +24,7 @@ namespace Kinetis\Orbitron;
 final readonly class Documents
 {
     /** The inventory envelope's own version, moved only when its shape changes. */
-    public const int INSPECT_SCHEMA_VERSION = 1;
+    public const int INSPECT_SCHEMA_VERSION = 2;
 
     /** The verification envelope's own version, moved only when its shape changes. */
     public const int VERIFY_SCHEMA_VERSION = 1;
@@ -64,14 +66,28 @@ final readonly class Documents
     }
 
     /**
-     * The installed `kinetis/*` inventory. Reading it cannot fail, so the
-     * document is never a failure.
+     * The physical checkout being read and its installed `kinetis/*`
+     * inventory. The document is never a failure.
+     *
+     * The detected root is lexical, so it is canonicalized here: two
+     * checkouts with the same lock state differ only by this path, and a
+     * path through a symlink would not identify the checkout.
+     *
+     * @param string $projectRoot the detected consumer root, never a path a caller chose
+     * @throws RuntimeException when the root does not resolve to a physical path
      */
-    public function inspect(): Document
+    public function inspect(string $projectRoot): Document
     {
+        $physicalRoot = realpath($projectRoot);
+
+        if ($physicalRoot === false) {
+            throw new RuntimeException("The project root {$projectRoot} does not resolve to a physical path.");
+        }
+
         return new Document([
             'schemaVersion' => self::INSPECT_SCHEMA_VERSION,
             'orbitronVersion' => $this->packages->orbitronVersion(),
+            'projectRoot' => $physicalRoot,
             'packages' => $this->packages->records(),
         ], false);
     }
