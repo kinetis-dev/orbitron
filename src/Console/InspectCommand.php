@@ -16,6 +16,10 @@ use Kinetis\Runtime\ProjectRoot;
  * confirms which checkout it reads and that project's Kinetis versions
  * before reading a guide.
  *
+ * No launcher stands between this command and its caller, so it reports
+ * the physical project root as `checkoutRoot` too: the identity of this
+ * process's own filesystem view.
+ *
  * JSON is the only format: this document exists to be parsed. Omitting
  * `--format` and writing `--format=json` are the same invocation.
  *

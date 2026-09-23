@@ -79,7 +79,7 @@ for every file verbatim.
 
 ```console
 vendor/bin/kinetis orbitron:context   # what Orbitron is, links to the guides, installed kinetis/* versions
-vendor/bin/kinetis orbitron:inspect   # the physical project root and installed kinetis/* inventory, as JSON
+vendor/bin/kinetis orbitron:inspect   # the project and checkout roots and installed kinetis/* inventory, as JSON
 vendor/bin/kinetis orbitron:verify    # whether this project's Composer layout is the one Orbitron supports
 vendor/bin/kinetis orbitron:scaffold  # a GET /health controller and test — preview, then --apply
 ```
@@ -94,7 +94,10 @@ vendor/bin/kinetis-orbitron-mcp
 ```
 
 A stdio MCP server speaking `2025-06-18`. Register it as a stdio server
-named `orbitron`; it takes no argument and needs no environment.
+named `orbitron`; it takes no argument. A launcher that runs it in a
+container sets `KINETIS_ORBITRON_CHECKOUT_ROOT` to the checkout's
+absolute host path, which `orbitron_inspect` reports as `checkoutRoot`;
+see [`orbitron:inspect`](https://kinetis.dev/docs/appendix-orbitron.html#orbitron-inspect).
 
 | Tool or resource | What it does |
 |---|---|

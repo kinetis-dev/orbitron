@@ -39,12 +39,15 @@ use stdClass;
  * owner of all of it and is installable on its own; none of it is
  * copied here.
  *
- * The project root and that documentation application are the only
- * things this object holds; the inventory, the documents built from it
- * and the source reader are created for one operation and discarded
- * with its response. No MCP message can name a source body, a URL, an
- * origin, a ref, a template, a command or the inventory path: four tools
- * take no argument at all, a resource read and the two documentation
+ * The project root, the checkout identity its launcher handed over and
+ * that documentation application are the only things this object
+ * holds; the inventory, the documents built from it and the source
+ * reader are created for one operation and discarded with its response.
+ * The checkout identity is only ever reported: every read, listing,
+ * verification and write goes through the project root. No MCP message
+ * can name a checkout, a source body, a URL, an origin, a ref, a
+ * template, a command or the inventory path: four tools take no
+ * argument at all, a resource read and the two documentation
  * tools each select one entry of a fixed catalogue whose URLs are the
  * documentation server's own constants, and the three that take a path
  * admit it only as a relative name under one installed package: each
@@ -77,6 +80,13 @@ final readonly class OrbitronMcpApplication implements McpApplication
 
     public const string LIST_TOOL = 'orbitron_list_package_source';
 
+    /**
+     * The environment variable a containerized launcher sets to the
+     * absolute physical path of the checkout on its host, reported by
+     * `orbitron_inspect` as `checkoutRoot`.
+     */
+    public const string CHECKOUT_ROOT_ENV = 'KINETIS_ORBITRON_CHECKOUT_ROOT';
+
     private const string DOCS_ENTRY_URI = 'kinetis://docs/agent-workflow';
 
     private const string INSTRUCTIONS = 'Orbitron reports what this project has, serves the Kinetis documentation, '
@@ -87,7 +97,7 @@ final readonly class OrbitronMcpApplication implements McpApplication
         . 'client was launched from. Once those first calls succeed, do not switch to or create another checkout or '
         . 'worktree for application work: a different checkout is a different Orbitron project, so end the '
         . 'session, launch the client from that checkout, and repeat context, inspect and verify before editing. '
-        . 'The projectRoot orbitron_inspect reports must equal pwd -P in the checkout you are editing; on a '
+        . 'The checkoutRoot orbitron_inspect reports must equal pwd -P in the checkout you are editing; on a '
         . 'mismatch, stop and launch the client from the intended checkout. '
         . 'Before changing application code, '
         . 'read ' . self::DOCS_ENTRY_URI . ' and route the task through the pages it names — read them instead of '
@@ -119,10 +129,14 @@ final readonly class OrbitronMcpApplication implements McpApplication
      * @param DocsApplication $docs the documentation server this one
      *        publishes and delegates to, constructed with the diagnostic
      *        stream a failed fetch is reported on — never stdout.
+     * @param string|null $checkoutRoot the launcher's absolute host path
+     *        for this checkout, or null when the client shares this
+     *        process's filesystem view
      */
     public function __construct(
         private string $projectRoot,
         private DocsApplication $docs,
+        private ?string $checkoutRoot = null,
     ) {}
 
     /**
@@ -170,8 +184,9 @@ final readonly class OrbitronMcpApplication implements McpApplication
         return [
             self::tool(
                 'orbitron_inspect',
-                'Reports the physical project root this server reads and its installed kinetis/* packages and '
-                . 'their versions as a JSON document. '
+                'Reports the physical project root this server reads, the checkout root that identifies this '
+                . 'checkout in the client\'s own view, and its installed kinetis/* packages and their versions as a '
+                . 'JSON document. '
                 . 'Read from this project\'s Composer inventory on every call, so a completed dependency change '
                 . 'shows up here without restarting or reconnecting.',
                 self::readOnly(),
@@ -403,7 +418,7 @@ final readonly class OrbitronMcpApplication implements McpApplication
         // tool invalid, and must not turn that refusal into an internal
         // error. The selected arm takes the operation's one snapshot.
         return self::result(match ($name) {
-            'orbitron_inspect' => $this->documents()->inspect($this->projectRoot),
+            'orbitron_inspect' => $this->documents()->inspect($this->projectRoot, $this->checkoutRoot),
             'orbitron_verify' => $this->documents()->verify($this->projectRoot),
             'orbitron_scaffold_plan' => $this->documents()->scaffold($this->projectRoot, ScaffoldMode::Preview),
             'orbitron_scaffold_apply' => $this->documents()->scaffold($this->projectRoot, ScaffoldMode::Apply),

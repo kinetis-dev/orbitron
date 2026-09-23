@@ -140,7 +140,7 @@ final class OrbitronMcpApplicationTest extends TestCase
     /**
      * The server cannot follow an agent into another checkout, so the
      * instructions keep application work in the one it was launched
-     * from and name the root comparison that detects a mismatch.
+     * from and name the checkout comparison that detects a mismatch.
      */
     public function test_the_instructions_bind_the_session_to_its_launch_checkout(): void
     {
@@ -158,7 +158,7 @@ final class OrbitronMcpApplicationTest extends TestCase
             $instructions,
         );
         self::assertStringContainsString(
-            'The projectRoot orbitron_inspect reports must equal pwd -P in the checkout you are editing; on a '
+            'The checkoutRoot orbitron_inspect reports must equal pwd -P in the checkout you are editing; on a '
             . 'mismatch, stop and launch the client from the intended checkout.',
             $instructions,
         );
@@ -641,6 +641,7 @@ final class OrbitronMcpApplicationTest extends TestCase
         self::assertSame($output->contents(), $frame['result']['content'][0]['text']);
         self::assertSame(Documents::INSPECT_SCHEMA_VERSION, self::document($frame)['schemaVersion']);
         self::assertSame(realpath($this->project->root), self::document($frame)['projectRoot']);
+        self::assertSame(realpath($this->project->root), self::document($frame)['checkoutRoot']);
     }
 
     /**

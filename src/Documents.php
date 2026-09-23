@@ -24,7 +24,7 @@ use RuntimeException;
 final readonly class Documents
 {
     /** The inventory envelope's own version, moved only when its shape changes. */
-    public const int INSPECT_SCHEMA_VERSION = 2;
+    public const int INSPECT_SCHEMA_VERSION = 3;
 
     /** The verification envelope's own version, moved only when its shape changes. */
     public const int VERIFY_SCHEMA_VERSION = 1;
@@ -66,28 +66,38 @@ final readonly class Documents
     }
 
     /**
-     * The physical checkout being read and its installed `kinetis/*`
-     * inventory. The document is never a failure.
+     * The physical checkout being read, the checkout identity its client
+     * sees, and its installed `kinetis/*` inventory. The document is never
+     * a failure.
      *
-     * The detected root is lexical, so it is canonicalized here: two
-     * checkouts with the same lock state differ only by this path, and a
-     * path through a symlink would not identify the checkout.
+     * The detected root is lexical, so it is canonicalized here: a path
+     * through a symlink would not identify the checkout this process
+     * reads.
+     *
+     * The checkout root is reported exactly as given and never touches the
+     * filesystem: it names the checkout in the client's own view, which a
+     * containerized server cannot see.
      *
      * @param string $projectRoot the detected consumer root, never a path a caller chose
+     * @param string|null $checkoutRoot the launcher's absolute host path for this checkout, or null
+     *        when the client shares this process's view and the physical root is that identity
      * @throws RuntimeException when the root does not resolve to a physical path
      */
-    public function inspect(string $projectRoot): Document
+    public function inspect(string $projectRoot, ?string $checkoutRoot = null): Document
     {
         $physicalRoot = realpath($projectRoot);
 
         if ($physicalRoot === false) {
-            throw new RuntimeException("The project root {$projectRoot} does not resolve to a physical path.");
+            throw new RuntimeException( // NOSONAR(php:S112) framework-detected root, no caller-specific recovery
+                "The project root {$projectRoot} does not resolve to a physical path.",
+            );
         }
 
         return new Document([
             'schemaVersion' => self::INSPECT_SCHEMA_VERSION,
             'orbitronVersion' => $this->packages->orbitronVersion(),
             'projectRoot' => $physicalRoot,
+            'checkoutRoot' => $checkoutRoot ?? $physicalRoot,
             'packages' => $this->packages->records(),
         ], false);
     }

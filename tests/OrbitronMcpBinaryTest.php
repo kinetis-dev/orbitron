@@ -194,6 +194,82 @@ final class OrbitronMcpBinaryTest extends TestCase
     }
 
     /**
+     * The skeleton launcher hands the checkout's host path to a server
+     * whose filesystem cannot see it. The path comes back byte for byte
+     * as `checkoutRoot` — never resolved, never required to exist — while
+     * the inventory, the layout and the installed source are all read
+     * from the real project, which `projectRoot` still names.
+     *
+     * @throws JsonException
+     */
+    public function test_a_handed_over_host_path_is_reported_and_never_read(): void
+    {
+        $hostPath = '/host/' . bin2hex(random_bytes(8)) . "/shop checkout\nsecond line";
+        self::assertFileDoesNotExist($hostPath);
+
+        $frames = $this->session([
+            '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"orbitron_inspect"}}',
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"orbitron_verify"}}',
+            '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::SOURCE_TOOL
+            . '","arguments":{"package":"kinetis/framework","path":"composer.json","lineCount":1}}}',
+        ], $hostPath);
+
+        $inspect = $this->document($frames[0]);
+        $verify = $this->document($frames[1]);
+
+        self::assertSame($hostPath, $inspect['checkoutRoot']);
+        self::assertSame(realpath($this->project->root), $inspect['projectRoot']);
+        self::assertContains(
+            ['name' => 'kinetis/framework', 'version' => InstalledVersions::getPrettyVersion('kinetis/framework')],
+            $inspect['packages'],
+        );
+
+        self::assertSame('pass', $verify['status']);
+        self::assertSame(
+            ['production' => $this->project->production, 'test' => $this->project->test],
+            $verify['namespaces'],
+        );
+        self::assertSame('ok', $this->document($frames[2])['status']);
+    }
+
+    /**
+     * With no launcher in between, the client shares the server's view,
+     * so the one physical root is the checkout identity as well.
+     *
+     * @throws JsonException
+     */
+    public function test_without_a_handover_both_roots_are_the_physical_project_root(): void
+    {
+        $inspect = $this->document($this->session([
+            '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"orbitron_inspect"}}',
+        ])[0]);
+
+        self::assertSame(realpath($this->project->root), $inspect['projectRoot']);
+        self::assertSame($inspect['projectRoot'], $inspect['checkoutRoot']);
+    }
+
+    /**
+     * A handover that is not an absolute path is a broken launcher. It
+     * stops the process before the protocol loop answers anything, so no
+     * client ever receives an identity the launcher did not mean.
+     */
+    public function test_a_relative_handover_exits_before_the_loop(): void
+    {
+        [$stdout, $stderr, $exitCode] = $this->execute([
+            '{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18",'
+            . '"capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}',
+        ], 'host/shop');
+
+        self::assertSame(1, $exitCode);
+        self::assertSame('', $stdout);
+        self::assertSame(
+            OrbitronMcpApplication::SERVER_NAME . ': ' . OrbitronMcpApplication::CHECKOUT_ROOT_ENV
+            . " must be an absolute path.\n",
+            $stderr,
+        );
+    }
+
+    /**
      * A path the tool does not admit is refused by the real binary too,
      * and the refusal names nothing about this machine.
      *
@@ -269,9 +345,9 @@ final class OrbitronMcpBinaryTest extends TestCase
      * @param list<string> $messages
      * @return list<array<string, mixed>>
      */
-    private function session(array $messages): array
+    private function session(array $messages, ?string $checkoutRoot = null): array
     {
-        [$stdout, $stderr, $exitCode] = $this->execute($messages);
+        [$stdout, $stderr, $exitCode] = $this->execute($messages, $checkoutRoot);
 
         self::assertSame('', $stderr, 'the server reported a diagnostic');
         self::assertSame(0, $exitCode);
@@ -289,15 +365,27 @@ final class OrbitronMcpBinaryTest extends TestCase
     }
 
     /**
+     * The binary runs in this suite's environment, less any inherited
+     * checkout handover, plus the one a test passes.
+     *
      * @param list<string> $messages
      * @return array{string, string, int}
      */
-    private function execute(array $messages): array
+    private function execute(array $messages, ?string $checkoutRoot = null): array
     {
+        $environment = getenv();
+        unset($environment[OrbitronMcpApplication::CHECKOUT_ROOT_ENV]);
+
+        if ($checkoutRoot !== null) {
+            $environment[OrbitronMcpApplication::CHECKOUT_ROOT_ENV] = $checkoutRoot;
+        }
+
         $process = proc_open(
             [PHP_BINARY, $this->project->path('vendor/bin/kinetis-orbitron-mcp')],
             [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']],
             $pipes,
+            null,
+            $environment,
         );
 
         if (!is_resource($process)) {

@@ -32,6 +32,19 @@ require $autoloadPath;
 // package's own root, one directory above bin/.
 $projectRoot = ProjectRoot::detect(__DIR__);
 
+// A containerized launcher hands over the checkout's physical path on
+// its host, which the server reports as `checkoutRoot` and never opens:
+// it may not exist in this filesystem view. Unset means the client shares
+// this view, and the physical project root is that identity.
+$checkoutRoot = getenv(OrbitronMcpApplication::CHECKOUT_ROOT_ENV);
+
+if ($checkoutRoot !== false && !str_starts_with($checkoutRoot, '/')) {
+    fwrite(STDERR, OrbitronMcpApplication::SERVER_NAME . ': ' . OrbitronMcpApplication::CHECKOUT_ROOT_ENV
+        . " must be an absolute path.\n");
+
+    exit(1);
+}
+
 // Nothing but JSON-RPC frames may reach stdout, so a failure that ends the
 // loop is reported on stderr, and stderr is also what the composed
 // documentation server writes a failed page fetch's real reason to — the
@@ -39,7 +52,11 @@ $projectRoot = ProjectRoot::detect(__DIR__);
 // application is never booted: no route, listener or package bootstrap
 // runs.
 try {
-    $application = new OrbitronMcpApplication($projectRoot, new DocsApplication(diagnostics: STDERR));
+    $application = new OrbitronMcpApplication(
+        $projectRoot,
+        new DocsApplication(diagnostics: STDERR),
+        $checkoutRoot === false ? null : $checkoutRoot,
+    );
 
     new StdioLoop()->run(new McpServer($application->serverInfo(), $application), STDIN, STDOUT);
 } catch (Throwable $e) {

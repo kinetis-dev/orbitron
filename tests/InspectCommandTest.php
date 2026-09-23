@@ -91,9 +91,10 @@ final class InspectCommandTest extends TestCase
         self::assertSame(
             <<<JSON
             {
-                "schemaVersion": 2,
+                "schemaVersion": 3,
                 "orbitronVersion": "1.0.0",
                 "projectRoot": {$encoded},
+                "checkoutRoot": {$encoded},
                 "packages": [
                     {
                         "name": "kinetis/framework",
@@ -119,7 +120,8 @@ final class InspectCommandTest extends TestCase
     /**
      * The detected root is lexical; the document reports the checkout it
      * physically names, so a root reached through a symlink segment is
-     * reported as its target.
+     * reported as its target — as the checkout identity too, since the
+     * command has no launcher to hand one over.
      *
      * @throws JsonException
      */
@@ -133,6 +135,7 @@ final class InspectCommandTest extends TestCase
         self::assertSame(0, $this->invoke(root: $link . '/.'));
 
         self::assertSame(realpath($target), $this->document()['projectRoot']);
+        self::assertSame(realpath($target), $this->document()['checkoutRoot']);
         self::assertNotSame($link, $this->document()['projectRoot']);
     }
 
