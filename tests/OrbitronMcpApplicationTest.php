@@ -18,6 +18,7 @@ use Kinetis\Orbitron\Documents;
 use Kinetis\Orbitron\HealthScaffold;
 use Kinetis\Orbitron\InstalledPackages;
 use Kinetis\Orbitron\Mcp\OrbitronMcpApplication;
+use Kinetis\Orbitron\PackageSourceReader;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use stdClass;
@@ -50,6 +51,7 @@ final class OrbitronMcpApplicationTest extends TestCase
         'orbitron_scaffold_apply',
         OrbitronMcpApplication::SOURCE_TOOL,
         OrbitronMcpApplication::SEARCH_TOOL,
+        OrbitronMcpApplication::TREE_SEARCH_TOOL,
         OrbitronMcpApplication::LIST_TOOL,
         DocsApplication::READ_TOOL,
         DocsApplication::SEARCH_TOOL,
@@ -227,27 +229,86 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The listing tool publishes the narrowest schema of the three: the
+     * The listing tool publishes the narrowest schema of the four: the
      * package and the path, and no member that could turn one directory
      * into a recursive walk, a filter or a page.
      */
     public function test_the_listing_tool_publishes_a_closed_schema_of_a_package_and_a_path(): void
     {
         $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
-        $schema = $tools[6]['inputSchema'];
+        $schema = $tools[7]['inputSchema'];
 
-        self::assertSame(OrbitronMcpApplication::LIST_TOOL, $tools[6]['name']);
+        self::assertSame(OrbitronMcpApplication::LIST_TOOL, $tools[7]['name']);
         self::assertSame(['package', 'path'], $schema['required']);
         self::assertFalse($schema['additionalProperties']);
         self::assertSame(['package', 'path'], array_keys($schema['properties']));
         self::assertSame(1, $schema['properties']['package']['minLength']);
         self::assertSame(1, $schema['properties']['path']['minLength']);
         self::assertSame(256, $schema['properties']['path']['maxLength']);
-        self::assertStringContainsString('200', $tools[6]['description']);
+        self::assertStringContainsString('200', $tools[7]['description']);
     }
 
     /**
-     * The three installed-source tools accept any real installed
+     * The tree search publishes the package, the query and an optional
+     * directory defaulting to the package root — and no first line,
+     * cursor, pattern or result count, because `hasMore` is answered by
+     * narrowing rather than by paging.
+     */
+    public function test_the_tree_search_tool_publishes_a_closed_schema_with_an_optional_path(): void
+    {
+        $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
+        $tool = $tools[6];
+        $schema = $tool['inputSchema'];
+
+        self::assertSame(OrbitronMcpApplication::TREE_SEARCH_TOOL, $tool['name']);
+        self::assertSame(['package', 'query'], $schema['required']);
+        self::assertFalse($schema['additionalProperties']);
+        self::assertSame(['package', 'query', 'path'], array_keys($schema['properties']));
+        self::assertSame(1, $schema['properties']['package']['minLength']);
+        self::assertSame(1, $schema['properties']['query']['minLength']);
+        self::assertSame(256, $schema['properties']['query']['maxLength']);
+        self::assertSame(1, $schema['properties']['path']['minLength']);
+        self::assertSame(256, $schema['properties']['path']['maxLength']);
+        self::assertSame('.', $schema['properties']['path']['default']);
+        self::assertStringContainsString('"hasMore" true means narrow the query or the path', $tool['description']);
+        self::assertStringContainsString(
+            '"package_search_oversize": narrow the path, most commonly to "src"',
+            $tool['description'],
+        );
+        self::assertStringContainsString('more than 512 files', $tool['description']);
+        self::assertStringContainsString('more than 8388608 bytes', $tool['description']);
+    }
+
+    /**
+     * The instructions route an unknown file to the tree search, name
+     * what its two narrowing signals mean, and send an agent to the
+     * package's own composer.json for what it is rather than to a
+     * separate overview.
+     */
+    public function test_the_instructions_route_an_unknown_file_to_the_tree_search(): void
+    {
+        $instructions = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":'
+            . '"2025-06-18","capabilities":{},"clientInfo":{"name":"manual","version":"0"}}}'])[0]
+            ['result']['instructions'];
+
+        self::assertStringContainsString(
+            'When the package is known but the file is not, call ' . OrbitronMcpApplication::TREE_SEARCH_TOOL,
+            $instructions,
+        );
+        self::assertStringContainsString(
+            'Its hasMore means narrow the query or the path; its package_search_oversize refusal means narrow '
+            . 'the path, most commonly to src.',
+            $instructions,
+        );
+        self::assertStringContainsString(
+            'composer.json with orbitron_read_package_source for its description, requirements, PSR-4 roots '
+            . 'and extra.kinetis',
+            $instructions,
+        );
+    }
+
+    /**
+     * The four installed-source tools accept any real installed
      * dependency, so their published text has to say where a name that
      * is not `kinetis/*` comes from. `orbitron_inspect` reports the
      * `kinetis/*` inventory and nothing else: a description sending an
@@ -260,7 +321,7 @@ final class OrbitronMcpApplicationTest extends TestCase
     {
         $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
 
-        foreach ([4, 5, 6] as $index) {
+        foreach ([4, 5, 6, 7] as $index) {
             $name = $tools[$index]['name'];
             $package = $tools[$index]['inputSchema']['properties']['package']['description'];
 
@@ -303,6 +364,7 @@ final class OrbitronMcpApplicationTest extends TestCase
             self::TOOLS[4],
             self::TOOLS[5],
             self::TOOLS[6],
+            self::TOOLS[7],
         ];
 
         foreach ($reading as $name) {
@@ -462,7 +524,7 @@ final class OrbitronMcpApplicationTest extends TestCase
     public function test_the_documentation_tools_are_published_as_the_documentation_server_authors_them(): void
     {
         $tools = $this->frames(['{"jsonrpc":"2.0","id":1,"method":"tools/list"}'])[0]['result']['tools'];
-        $published = array_slice($tools, 7);
+        $published = array_slice($tools, 8);
 
         self::assertCount(2, $published);
 
@@ -1339,8 +1401,9 @@ final class OrbitronMcpApplicationTest extends TestCase
         yield 'path not a string' => ['{"package":"kinetis/fixture","path":["src"]}'];
         yield 'path too long' => ['{"package":"kinetis/fixture","path":"src/' . str_repeat('a', 253) . '"}'];
 
-        // The members the other two tools take, and the ones a listing
-        // would need to become a walk: this schema names none of them.
+        // The members the window and the file search take, and the ones
+        // a listing would need to become a walk: this schema names none
+        // of them.
         yield 'the window tool\'s startLine' => ['{"package":"kinetis/fixture","path":"src","startLine":1}'];
         yield 'the window tool\'s lineCount' => ['{"package":"kinetis/fixture","path":"src","lineCount":10}'];
         yield 'the search tool\'s query' => ['{"package":"kinetis/fixture","path":"src","query":"final"}'];
@@ -1351,7 +1414,7 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The listing schema is enforced here as fully as the other two, so
+     * The listing schema is enforced here as fully as the other three, so
      * a client that ignored it still cannot reach the reader with a
      * member the published schema has no reading of — least of all one
      * that would widen a directory into a tree.
@@ -1369,6 +1432,141 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
+     * With no path the tree search covers the whole package, and it
+     * reaches the reader through the same routing every installed-source
+     * tool uses.
+     *
+     * @throws JsonException
+     */
+    public function test_a_tree_search_defaults_to_the_package_root(): void
+    {
+        file_put_contents($this->project->path('src/Http/Controller.php'), "final class Controller\n");
+
+        $document = $this->call(
+            '{"package":"' . self::PACKAGE . '","query":"final class"}',
+            OrbitronMcpApplication::TREE_SEARCH_TOOL,
+        );
+
+        self::assertSame([
+            'status' => 'ok',
+            'package' => self::PACKAGE,
+            'version' => '3.1.4',
+            'path' => '.',
+            'query' => 'final class',
+            'matches' => [
+                ['path' => 'src/Http/Controller.php', 'line' => 1, 'content' => 'final class Controller'],
+            ],
+            'hasMore' => false,
+        ], $document);
+    }
+
+    /**
+     * A tree past its budget is a tool that ran and refused: an error
+     * result carrying the code alone, and no match from the part of the
+     * tree that would have fitted.
+     *
+     * @throws JsonException
+     */
+    public function test_an_oversized_tree_is_an_error_result_carrying_only_the_code(): void
+    {
+        for ($index = 0; $index <= PackageSourceReader::MAX_TREE_FILE_COUNT; $index++) {
+            file_put_contents($this->project->path("src/Http/F{$index}.php"), "needle\n");
+        }
+
+        $frame = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"'
+            . OrbitronMcpApplication::TREE_SEARCH_TOOL . '","arguments":{"package":"' . self::PACKAGE
+            . '","query":"needle","path":"src"}}}',
+        ])[0];
+
+        self::assertTrue($frame['result']['isError']);
+        self::assertSame(['status' => 'error', 'code' => 'package_search_oversize'], self::document($frame));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function invalidTreeSearchArgumentsProvider(): iterable
+    {
+        yield 'no arguments at all' => ['{}'];
+        yield 'package missing' => ['{"query":"final"}'];
+        yield 'query missing' => ['{"package":"kinetis/fixture"}'];
+        yield 'query empty' => ['{"package":"kinetis/fixture","query":""}'];
+        yield 'query too long' => ['{"package":"kinetis/fixture","query":"' . str_repeat('a', 257) . '"}'];
+        yield 'path empty' => ['{"package":"kinetis/fixture","query":"final","path":""}'];
+        yield 'path null' => ['{"package":"kinetis/fixture","query":"final","path":null}'];
+        yield 'path too long' => [
+            '{"package":"kinetis/fixture","query":"final","path":"src/' . str_repeat('a', 253) . '"}',
+        ];
+
+        // No cursor or first line: hasMore is answered by narrowing.
+        yield 'a first line' => ['{"package":"kinetis/fixture","query":"final","startLine":1}'];
+        yield 'a cursor' => ['{"package":"kinetis/fixture","query":"final","cursor":"x"}'];
+        yield 'a glob' => ['{"package":"kinetis/fixture","query":"final","pattern":"*.php"}'];
+    }
+
+    #[DataProvider('invalidTreeSearchArgumentsProvider')]
+    public function test_tree_search_arguments_outside_the_schema_are_invalid_params(string $arguments): void
+    {
+        $frame = $this->frames([
+            '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"'
+            . OrbitronMcpApplication::TREE_SEARCH_TOOL . '","arguments":' . $arguments . '}}',
+        ])[0];
+
+        self::assertSame(-32602, $frame['error']['code']);
+        self::assertArrayNotHasKey('result', $frame);
+    }
+
+    /**
+     * Every document tool, success and refusal alike, sends the same
+     * document twice: as the text every client reads and as
+     * `structuredContent`. Compared as encoded JSON, so key order and
+     * the object-or-list type of every member count, which an
+     * associative decode would blur.
+     *
+     * @throws JsonException
+     */
+    public function test_every_document_result_carries_the_same_document_as_structured_content(): void
+    {
+        file_put_contents($this->project->path('src/Http/Controller.php'), "final class Controller\n");
+
+        $calls = [
+            'orbitron_inspect' => '{}',
+            'orbitron_verify' => '{}',
+            'orbitron_scaffold_plan' => '{}',
+            OrbitronMcpApplication::SOURCE_TOOL => '{"package":"' . self::PACKAGE
+                . '","path":"src/Http/Controller.php"}',
+            OrbitronMcpApplication::SEARCH_TOOL => '{"package":"' . self::PACKAGE
+                . '","path":"src/Http/Controller.php","query":"final"}',
+            OrbitronMcpApplication::TREE_SEARCH_TOOL => '{"package":"' . self::PACKAGE . '","query":"final"}',
+            OrbitronMcpApplication::LIST_TOOL => '{"package":"' . self::PACKAGE . '","path":"."}',
+            'a refusal' => '{"package":"' . self::PACKAGE . '","path":"src/Absent.php"}',
+        ];
+        $messages = [];
+
+        foreach ($calls as $name => $arguments) {
+            $tool = $name === 'a refusal' ? OrbitronMcpApplication::SOURCE_TOOL : $name;
+            $messages[] = '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"' . $tool
+                . '","arguments":' . $arguments . '}}';
+        }
+
+        $frames = $this->rawFrames($messages);
+
+        self::assertCount(count($calls), $frames);
+
+        foreach (array_keys($calls) as $index => $name) {
+            $result = json_decode($frames[$index], flags: JSON_THROW_ON_ERROR)->result;
+
+            self::assertSame($name === 'a refusal', $result->isError, $name);
+            self::assertSame(
+                json_encode(json_decode($result->content[0]->text, flags: JSON_THROW_ON_ERROR), JSON_THROW_ON_ERROR),
+                json_encode($result->structuredContent, JSON_THROW_ON_ERROR),
+                $name,
+            );
+        }
+    }
+
+    /**
      * @return iterable<string, array{string}>
      */
     public static function documentToolProvider(): iterable
@@ -1379,7 +1577,7 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The three tools that take arguments must not have loosened the
+     * The four tools that take arguments must not have loosened the
      * other four: each of them still refuses any argument at all.
      */
     #[DataProvider('documentToolProvider')]
@@ -1512,7 +1710,9 @@ final class OrbitronMcpApplicationTest extends TestCase
     }
 
     /**
-     * The document one frame's tool result carries.
+     * The document one frame's tool result carries, after asserting that
+     * `structuredContent` is that same document — so every call asserted
+     * through here proves the parity.
      *
      * @param array<string, mixed> $frame
      * @return array<string, mixed>
@@ -1522,8 +1722,11 @@ final class OrbitronMcpApplicationTest extends TestCase
     {
         self::assertArrayHasKey('result', $frame, 'the call was refused: ' . json_encode($frame));
 
-        /** @var array<string, mixed> */
-        return json_decode($frame['result']['content'][0]['text'], true, flags: JSON_THROW_ON_ERROR);
+        /** @var array<string, mixed> $document */
+        $document = json_decode($frame['result']['content'][0]['text'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame($document, $frame['result']['structuredContent']);
+
+        return $document;
     }
 
     /**

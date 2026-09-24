@@ -14,11 +14,12 @@ use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 /**
- * The installed-source window, the literal search over the same files
- * and the directory listing that finds them, against a real package
+ * The installed-source window, the literal search of one file or of a
+ * directory tree, and the directory listing, against a real package
  * directory: the bytes a window carries, the lines a search reports,
- * the children a listing names, and every refusal, decided from files
- * on disk rather than from a mocked filesystem.
+ * the children a listing names, the bounds of a tree, and every
+ * refusal, decided from files on disk rather than from a mocked
+ * filesystem.
  *
  * The package under test here is a fixture named like an installed one,
  * so what is proved is the reader's own rules — not whatever happens to
@@ -1149,6 +1150,327 @@ final class PackageSourceReaderTest extends TestCase
         }
     }
 
+    /**
+     * The order is bytewise over the whole relative path, not the order
+     * a walk meets the files in: `src/a.php` comes before `src/a/Z.php`
+     * because `.` sorts before `/`, although the walk reaches directory
+     * `a` first. Within a file, lines ascend.
+     */
+    public function test_a_tree_search_reports_matches_in_bytewise_path_then_line_order(): void
+    {
+        $this->write('src/b.php', "needle one\nnothing\nneedle three\n");
+        $this->write('src/a/Z.php', "needle\n");
+        $this->write('src/a.php', "needle\n");
+        $this->write('src/C.php', "needle\n");
+        $this->write('README.md', "no match\nthe needle\n");
+
+        $document = $this->searchTree('.', 'needle');
+
+        self::assertFalse($document->failed);
+        self::assertSame([
+            'status' => 'ok',
+            'package' => self::PACKAGE,
+            'version' => '2.4.0',
+            'path' => '.',
+            'query' => 'needle',
+            'matches' => [
+                ['path' => 'README.md', 'line' => 2, 'content' => 'the needle'],
+                ['path' => 'src/C.php', 'line' => 1, 'content' => 'needle'],
+                ['path' => 'src/a.php', 'line' => 1, 'content' => 'needle'],
+                ['path' => 'src/a/Z.php', 'line' => 1, 'content' => 'needle'],
+                ['path' => 'src/b.php', 'line' => 1, 'content' => 'needle one'],
+                ['path' => 'src/b.php', 'line' => 3, 'content' => 'needle three'],
+            ],
+            'hasMore' => false,
+        ], $document->body);
+    }
+
+    /**
+     * A narrower path searches only that subtree, and a match's path is
+     * still relative to the package root, so it is what a window takes.
+     */
+    public function test_a_tree_search_narrowed_to_a_subtree_reports_root_relative_paths(): void
+    {
+        $this->write('src/Http/Controller.php', "class Controller\n");
+        $this->write('src/Queue/Worker.php', "class Worker\n");
+        $this->write('README.md', "class in prose\n");
+
+        $document = $this->searchTree('src/Http', 'class');
+
+        self::assertSame('src/Http', $document->body['path']);
+        self::assertSame(
+            [['path' => 'src/Http/Controller.php', 'line' => 1, 'content' => 'class Controller']],
+            $document->body['matches'],
+        );
+        self::assertSame("class Controller\n", $this->read('src/Http/Controller.php', 1, 1)->body['content']);
+    }
+
+    public function test_a_tree_search_is_literal_and_case_sensitive_and_may_find_nothing(): void
+    {
+        $this->write('src/A.php', "Needle\nneedle.*\n");
+
+        self::assertSame(
+            [['path' => 'src/A.php', 'line' => 2, 'content' => 'needle.*']],
+            $this->searchTree('src', 'needle.*')->body['matches'],
+        );
+
+        $none = $this->searchTree('src', 'absent');
+
+        self::assertFalse($none->failed);
+        self::assertSame([], $none->body['matches']);
+        self::assertFalse($none->body['hasMore']);
+    }
+
+    /**
+     * The walk reaches exactly what successive listings would: a hidden
+     * name, the top-level vendor tree, a link onto either of those and a
+     * link out of the package are never opened, while a deeper vendor
+     * directory and a link staying inside the package are the package's
+     * own content. A link back to an ancestor is walked once, not
+     * forever.
+     *
+     * @throws JsonException
+     */
+    public function test_a_tree_search_reaches_only_what_a_listing_admits(): void
+    {
+        $outside = sys_get_temp_dir() . '/orbitron-outside-' . bin2hex(random_bytes(8));
+        file_put_contents($outside, "needle secret body\n");
+
+        $this->write('.env', "needle secret body\n");
+        $this->write('.git/config', "needle secret body\n");
+        $this->write('vendor/private/Secret.php', "needle secret body\n");
+        $this->write('src/.hidden/Secret.php', "needle secret body\n");
+        $this->write('src/Real.php', "needle real\n");
+        $this->write('src/vendor/Own.php', "needle own\n");
+
+        $this->link('src/Hidden.php', '.env');
+        $this->link('src/Vendored.php', 'vendor/private/Secret.php');
+        $this->link('src/Ancestor', 'src');
+        symlink($outside, $this->root . '/src/Escape.php');
+
+        $document = $this->searchTree('.', 'needle');
+
+        unlink($outside);
+
+        self::assertSame([
+            ['path' => 'src/Real.php', 'line' => 1, 'content' => 'needle real'],
+            ['path' => 'src/vendor/Own.php', 'line' => 1, 'content' => 'needle own'],
+        ], $document->body['matches']);
+        self::assertStringNotContainsString('secret body', $document->toJson());
+    }
+
+    /**
+     * A match is reported by the names the walk took, a link's included,
+     * while the directory behind a link is walked once by its resolved
+     * target: `src/Http` is not repeated after `lib/Alias` reached it.
+     * The path the call named is the prefix even when it is a link.
+     */
+    public function test_a_tree_search_reports_the_path_it_walked_rather_than_the_link_target(): void
+    {
+        $this->write('src/Http/Controller.php', "needle\n");
+        $this->link('lib/Alias', 'src/Http');
+        $this->link('lib/Linked.php', 'src/Http/Controller.php');
+
+        self::assertSame([
+            ['path' => 'lib/Alias/Controller.php', 'line' => 1, 'content' => 'needle'],
+            ['path' => 'lib/Linked.php', 'line' => 1, 'content' => 'needle'],
+        ], $this->searchTree('.', 'needle')->body['matches']);
+
+        self::assertSame(
+            [['path' => 'lib/Alias/Controller.php', 'line' => 1, 'content' => 'needle']],
+            $this->searchTree('lib/Alias', 'needle')->body['matches'],
+        );
+        self::assertSame("needle\n", $this->read('lib/Alias/Controller.php', 1, 1)->body['content']);
+    }
+
+    /**
+     * The reader lives as long as the MCP process, so a file rewritten
+     * between two calls is measured again: growing by one byte takes a
+     * tree that fit its budget past it.
+     */
+    public function test_a_file_rewritten_between_tree_searches_is_measured_again(): void
+    {
+        $reader = $this->reader();
+        $files = intdiv(PackageSourceReader::MAX_TREE_BYTES, PackageSourceReader::MAX_SOURCE_BYTES);
+
+        for ($index = 1; $index <= $files; $index++) {
+            $this->write("src/F{$index}.txt", str_repeat('x', PackageSourceReader::MAX_SOURCE_BYTES));
+        }
+
+        $this->write('src/A.php', '');
+
+        self::assertFalse($reader->searchTree(self::PACKAGE, 'src', 'n')->failed);
+
+        $this->write('src/A.php', 'n');
+
+        self::assertRefusal('package_search_oversize', $reader->searchTree(self::PACKAGE, 'src', 'n'));
+    }
+
+    public function test_a_tree_search_of_a_link_leaving_the_package_is_refused(): void
+    {
+        $outside = sys_get_temp_dir() . '/orbitron-outside-' . bin2hex(random_bytes(8));
+        mkdir($outside);
+        file_put_contents($outside . '/A.php', "needle\n");
+        symlink($outside, $this->root . '/src/Escape');
+
+        $document = $this->searchTree('src/Escape', 'needle');
+
+        unlink($outside . '/A.php');
+        rmdir($outside);
+
+        self::assertRefusal('source_unreadable', $document);
+    }
+
+    /**
+     * A file a window refuses as not text or as oversized is skipped, so
+     * an asset beside the source does not stop the search of it.
+     */
+    public function test_a_tree_search_skips_binary_and_oversized_files(): void
+    {
+        $this->write('src/A.php', "needle\n");
+        $this->write('src/logo.png', "needle\0binary\n");
+        $this->write('src/latin1.txt', "needle \xE9\n");
+        $this->write('src/huge.txt', "needle\n" . str_repeat('x', PackageSourceReader::MAX_SOURCE_BYTES));
+
+        $document = $this->searchTree('src', 'needle');
+
+        self::assertFalse($document->failed);
+        self::assertSame([['path' => 'src/A.php', 'line' => 1, 'content' => 'needle']], $document->body['matches']);
+    }
+
+    /**
+     * Every reportable regular file counts, skipped ones included, so the
+     * bound describes the tree rather than what happened to match.
+     */
+    public function test_exactly_the_admitted_file_count_is_searched(): void
+    {
+        $this->fill(PackageSourceReader::MAX_TREE_FILE_COUNT - 1);
+        $this->write('src/logo.png', "\0");
+
+        $document = $this->searchTree('src', 'body');
+
+        self::assertFalse($document->failed);
+        self::assertCount(PackageSourceReader::MAX_MATCH_COUNT, $document->body['matches']);
+    }
+
+    /**
+     * @throws JsonException
+     */
+    public function test_one_file_past_the_admitted_count_refuses_without_a_partial_match(): void
+    {
+        $this->fill(PackageSourceReader::MAX_TREE_FILE_COUNT - 1);
+        $this->write('src/logo.png', "\0");
+        $this->write('src/deeper/Z.php', "body\n");
+
+        $document = $this->searchTree('src', 'body');
+
+        self::assertRefusal('package_search_oversize', $document);
+        self::assertStringNotContainsString('A001.php', $document->toJson());
+
+        // Narrowing the path is the way past it.
+        self::assertSame(
+            [['path' => 'src/deeper/Z.php', 'line' => 1, 'content' => 'body']],
+            $this->searchTree('src/deeper', 'body')->body['matches'],
+        );
+    }
+
+    /**
+     * The byte budget counts the files that would be read. One past the
+     * per-file ceiling is skipped unread, so it spends none of it.
+     */
+    public function test_exactly_the_admitted_byte_total_is_searched(): void
+    {
+        $file = str_repeat("needle\n", intdiv(PackageSourceReader::MAX_SOURCE_BYTES, 7))
+            . str_repeat('x', PackageSourceReader::MAX_SOURCE_BYTES % 7);
+        $files = intdiv(PackageSourceReader::MAX_TREE_BYTES, PackageSourceReader::MAX_SOURCE_BYTES);
+
+        for ($index = 1; $index <= $files; $index++) {
+            $this->write("src/F{$index}.txt", $file);
+        }
+
+        $this->write('src/huge.txt', str_repeat('x', PackageSourceReader::MAX_SOURCE_BYTES + 1));
+
+        $document = $this->searchTree('src', 'needle');
+
+        self::assertFalse($document->failed);
+        self::assertTrue($document->body['hasMore']);
+    }
+
+    /**
+     * @throws JsonException
+     */
+    public function test_one_byte_past_the_admitted_total_refuses_without_a_partial_match(): void
+    {
+        $file = str_repeat('x', PackageSourceReader::MAX_SOURCE_BYTES);
+        $files = intdiv(PackageSourceReader::MAX_TREE_BYTES, PackageSourceReader::MAX_SOURCE_BYTES);
+
+        for ($index = 1; $index <= $files; $index++) {
+            $this->write("src/F{$index}.txt", $file);
+        }
+
+        $this->write('src/A.php', 'n');
+
+        $document = $this->searchTree('src', 'n');
+
+        self::assertRefusal('package_search_oversize', $document);
+    }
+
+    /**
+     * The cap is fifty matches, and the fifty-first is what establishes
+     * `hasMore` — across files as well as within one. There is no
+     * cursor: `hasMore` asks for a narrower query or path.
+     */
+    public function test_matches_past_the_cap_set_has_more_without_being_reported(): void
+    {
+        $this->write('src/A.php', str_repeat("needle\n", PackageSourceReader::MAX_MATCH_COUNT));
+        $this->write('src/B.php', "needle\n");
+
+        $document = $this->searchTree('src', 'needle');
+
+        self::assertCount(PackageSourceReader::MAX_MATCH_COUNT, $document->body['matches']);
+        self::assertTrue($document->body['hasMore']);
+        self::assertNotContains('src/B.php', array_column($document->body['matches'], 'path'));
+    }
+
+    public function test_exactly_the_cap_is_a_complete_tree_search(): void
+    {
+        $this->write('src/A.php', str_repeat("needle\n", PackageSourceReader::MAX_MATCH_COUNT - 1));
+        $this->write('src/B.php', "needle\n");
+
+        $document = $this->searchTree('src', 'needle');
+
+        self::assertCount(PackageSourceReader::MAX_MATCH_COUNT, $document->body['matches']);
+        self::assertFalse($document->body['hasMore']);
+    }
+
+    /**
+     * Every refusal is the code alone, and a tree search is admitted by
+     * the rule a listing is: the root token and any directory, never a
+     * file, a hidden name or the top-level vendor tree.
+     */
+    public function test_every_tree_search_refusal_is_the_code_alone(): void
+    {
+        $this->write('src/A.php', "needle\n");
+        $this->write('vendor/x/A.php', "needle\n");
+
+        self::assertRefusal('package_unknown', $this->reader()->searchTree('kinetis/absent', '.', 'needle'));
+        self::assertRefusal('path_not_admitted', $this->searchTree('vendor', 'needle'));
+        self::assertRefusal('path_not_admitted', $this->searchTree('src/../vendor', 'needle'));
+        self::assertRefusal('source_missing', $this->searchTree('src/Absent', 'needle'));
+        self::assertRefusal('source_not_directory', $this->searchTree('src/A.php', 'needle'));
+    }
+
+    public function test_a_file_name_that_is_not_utf8_refuses_the_tree_search(): void
+    {
+        $this->write('src/A.php', "needle\n");
+
+        if (@file_put_contents($this->root . "/src/\xC3\x28.php", "needle\n") === false) {
+            self::markTestSkipped('This filesystem refuses a name that is not UTF-8.');
+        }
+
+        self::assertRefusal('source_unreadable', $this->searchTree('src', 'needle'));
+    }
+
     private static function assertRefusal(string $code, Document $document): void
     {
         self::assertTrue($document->failed, "expected a refusal carrying {$code}");
@@ -1168,6 +1490,11 @@ final class PackageSourceReaderTest extends TestCase
     private function listing(string $path): Document
     {
         return $this->reader()->list(self::PACKAGE, $path);
+    }
+
+    private function searchTree(string $path, string $query): Document
+    {
+        return $this->reader()->searchTree(self::PACKAGE, $path, $query);
     }
 
     /** $count listable children of `src`, named so their order is plain. */

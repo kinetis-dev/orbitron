@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Kinetis\Orbitron;
 
 /**
- * One window, one bounded literal search, or one directory listing, of
- * one real installed, non-root Composer package, as the JSON document
- * the MCP tools return.
+ * One window, one bounded literal search of a file or of a directory
+ * tree, or one directory listing, of one real installed, non-root
+ * Composer package, as the JSON document the MCP tools return.
  *
  * The documentation pages Orbitron serves are published from main and
  * can describe behavior newer than a project has installed. This reader
@@ -21,23 +21,25 @@ namespace Kinetis\Orbitron;
  * installed, not a file browser.
  *
  * Nothing here is chosen by a caller except the package name, the
- * relative path, and the window or the query. All three calls reach the
+ * relative path, and the window or the query. Every call reaches the
  * filesystem through one resolver: the install root comes from
  * Composer's own installed set and is the whole read boundary; the path
  * is admitted by its syntax alone before anything is opened; and the
  * resolved target must satisfy that same syntax and still lie under
  * that same root. A symlink is therefore resolved and then re-admitted,
  * so one pointing out of the package, or at a name this tool does not
- * serve, is refused rather than followed — and a listing re-admits each
- * child the same way, so it reports only what a read of that name could
- * reach. A refusal names a fixed code and nothing else — no resolved
- * path, no exception text, no content.
+ * serve, is refused rather than followed — and a listing and a tree
+ * search re-admit each child the same way, so they reach only what a
+ * read of that name could reach. A refusal names a fixed code and
+ * nothing else — no resolved path, no exception text, no content.
  *
- * Both bounds are enforced by construction: a read is one stream read of
+ * Every bound is enforced by construction: a read is one stream read of
  * the admitted size plus one byte, and that byte alone tells an admitted
  * file from an oversized one; a listing stops at the child past the
- * admitted count and reports no partial directory. Nothing is retained
- * between calls.
+ * admitted count and reports no partial directory; a tree search stops
+ * its walk at the file or the byte past its budget, before any file is
+ * opened, and reports no partial match list. Nothing is retained between
+ * calls.
  */
 final readonly class PackageSourceReader
 {
@@ -63,11 +65,24 @@ final readonly class PackageSourceReader
     public const int MAX_ENTRY_COUNT = 200;
 
     /**
-     * The one path that names the package root itself. Only a listing
-     * takes it: it is where a caller starts when the layout is unknown,
-     * and there is no file behind it for a read to open.
+     * The most reportable regular files one tree search walks; the file
+     * past it refuses the call.
      */
-    private const string ROOT = '.';
+    public const int MAX_TREE_FILE_COUNT = 512;
+
+    /**
+     * The most bytes of searchable files one tree search reads; the file
+     * that would pass it refuses the call.
+     */
+    public const int MAX_TREE_BYTES = 8388608;
+
+    /**
+     * The one path that names the package root itself. Only a call that
+     * names a directory takes it: it is where a caller starts when the
+     * layout is unknown, and there is no file behind it for a read to
+     * open.
+     */
+    public const string ROOT = '.';
 
     public function __construct(private InstalledPackages $packages) {}
 
@@ -148,19 +163,7 @@ final readonly class PackageSourceReader
         $matches = [];
         $hasMore = false;
 
-        for ($line = $startLine; $line <= $total; $line++) {
-            $content = $lines[$line - 1];
-
-            // The terminator is the file's, not the line's, and a line
-            // carries at most one because the split point follows it.
-            if (str_ends_with($content, "\n")) {
-                $content = substr($content, 0, str_ends_with($content, "\r\n") ? -2 : -1);
-            }
-
-            if (!str_contains($content, $query)) {
-                continue;
-            }
-
+        foreach (self::matches($lines, $query, $startLine) as $line => $content) {
             // The match past the cap is the only reason the scan runs on
             // this far: it answers hasMore, and it is not reported.
             if (count($matches) === self::MAX_MATCH_COUNT) {
@@ -179,6 +182,96 @@ final readonly class PackageSourceReader
             'path' => $path,
             'query' => $query,
             'startLine' => $startLine,
+            'matches' => $matches,
+            'hasMore' => $hasMore,
+        ], failed: false);
+    }
+
+    /**
+     * The lines of every file under one admitted directory that contain
+     * $query, up to {@see MAX_MATCH_COUNT} of them in bytewise path order
+     * and then line order, or the refusal. Finding none is a successful
+     * search with an empty list, not a refusal.
+     *
+     * Each line is compared exactly as {@see search()} compares it. A
+     * match's path is relative to the package root and spelled by the
+     * names the walk took from the named path, a link's own name
+     * included, so it is the path a window of that file takes.
+     *
+     * The walk admits every file and directory by the rule a listing
+     * applies to its children, and it is bounded before any file is
+     * opened: the tree is refused whole with `package_search_oversize`
+     * when it holds more than {@see MAX_TREE_FILE_COUNT} reportable
+     * files, or when the files it would read pass
+     * {@see MAX_TREE_BYTES}. The bounds describe the tree, not the query,
+     * so a narrower path is the only way past them. A file a window
+     * would refuse as `source_oversize` or `source_not_text` is skipped
+     * rather than refusing the search, so an unrelated asset beside the
+     * source does not stop it; the oversized one is skipped unread and
+     * does not count toward the bytes.
+     *
+     * Scanning stops at the first match past the cap. There is no cursor
+     * to continue from: `hasMore` says the caller narrows the query or
+     * the path.
+     *
+     * @param string $path relative `/` syntax naming a directory under
+     *        the package root, or {@see ROOT} for the root itself
+     * @param string $query non-empty, already validated by the adapter to
+     *        at most {@see MAX_QUERY_LENGTH} characters
+     */
+    public function searchTree(string $package, string $path, string $query): Document
+    {
+        $resolved = $this->resolve($package, $path, directory: true);
+
+        if ($resolved instanceof Document) {
+            return $resolved;
+        }
+
+        if (!is_dir($resolved['target'])) {
+            return self::refuse('source_not_directory');
+        }
+
+        $files = self::tree($resolved['root'], $resolved['target'], $path === self::ROOT ? '' : $path . '/');
+
+        if ($files instanceof Document) {
+            return $files;
+        }
+
+        /** @var list<array{path: string, line: int, content: string}> $matches */
+        $matches = [];
+        $hasMore = false;
+
+        foreach ($files as [$logical, $file]) {
+            $lines = self::lines($file);
+
+            // Not text, or grown past the ceiling since the walk measured
+            // it: skipped like the oversized file the walk left out. Any
+            // other refusal is the answer.
+            if ($lines === 'source_oversize' || $lines === 'source_not_text') {
+                continue;
+            }
+
+            if (is_string($lines)) {
+                return self::refuse($lines);
+            }
+
+            foreach (self::matches($lines, $query, 1) as $line => $content) {
+                if (count($matches) === self::MAX_MATCH_COUNT) {
+                    $hasMore = true;
+
+                    break 2;
+                }
+
+                $matches[] = ['path' => $logical, 'line' => $line, 'content' => $content];
+            }
+        }
+
+        return new Document([
+            'status' => 'ok',
+            'package' => $package,
+            'version' => $resolved['version'],
+            'path' => $path,
+            'query' => $query,
             'matches' => $matches,
             'hasMore' => $hasMore,
         ], failed: false);
@@ -210,7 +303,7 @@ final readonly class PackageSourceReader
      */
     public function list(string $package, string $path): Document
     {
-        $resolved = $this->resolve($package, $path, listing: true);
+        $resolved = $this->resolve($package, $path, directory: true);
 
         if ($resolved instanceof Document) {
             return $resolved;
@@ -222,10 +315,25 @@ final readonly class PackageSourceReader
             return self::refuse('source_not_directory');
         }
 
-        $entries = self::children($resolved['root'], $resolved['target']);
+        /** @var list<array{name: string, type: string}> $entries */
+        $entries = [];
+        $children = self::children($resolved['root'], $resolved['target']);
 
-        if ($entries instanceof Document) {
-            return $entries;
+        foreach ($children as $name => [$type]) {
+            // Counted against what would be reported, and decided on the
+            // child past the cap, so the refusal is the whole answer and
+            // no partial name is built.
+            if (count($entries) === self::MAX_ENTRY_COUNT) {
+                return self::refuse('directory_oversize');
+            }
+
+            $entries[] = ['name' => $name, 'type' => $type];
+        }
+
+        $refusal = $children->getReturn();
+
+        if ($refusal !== null) {
+            return $refusal;
         }
 
         // The order is this tool's own, and bytewise: the same directory
@@ -249,24 +357,35 @@ final readonly class PackageSourceReader
      * A window and a search are admitted, confined, bounded and validated
      * identically — there is one path to a file, not one per tool — and
      * everything a listing shares with them lives in {@see resolve()}.
-     * What remains here is the file work itself.
      *
      * @return array{string, list<string>}|Document
      */
     private function load(string $package, string $path): array|Document
     {
-        $resolved = $this->resolve($package, $path, listing: false);
+        $resolved = $this->resolve($package, $path, directory: false);
 
         if ($resolved instanceof Document) {
             return $resolved;
         }
 
-        $target = $resolved['target'];
+        $lines = self::lines($resolved['target']);
 
+        return is_string($lines) ? self::refuse($lines) : [$resolved['version'], $lines];
+    }
+
+    /**
+     * The lines of one resolved file, or the code that refuses it: the
+     * file work a window, a file search and a tree search share, so each
+     * classifies a file the same way.
+     *
+     * @return list<string>|string
+     */
+    private static function lines(string $target): array|string
+    {
         // A directory or any other non-regular target is refused here
         // rather than opened.
         if (!is_file($target)) {
-            return self::refuse('source_unreadable');
+            return 'source_unreadable';
         }
 
         // Suppressed because the diagnostic is the returned code, not a
@@ -274,7 +393,7 @@ final readonly class PackageSourceReader
         $handle = @fopen($target, 'rb');
 
         if ($handle === false) {
-            return self::refuse('source_unreadable');
+            return 'source_unreadable';
         }
 
         $contents = stream_get_contents($handle, self::MAX_SOURCE_BYTES + 1);
@@ -282,19 +401,19 @@ final readonly class PackageSourceReader
         fclose($handle);
 
         if ($contents === false) {
-            return self::refuse('source_unreadable');
+            return 'source_unreadable';
         }
 
         // The extra byte arrived, so the file is larger than the
         // admitted size. Nothing beyond it was ever read.
         if (strlen($contents) > self::MAX_SOURCE_BYTES) {
-            return self::refuse('source_oversize');
+            return 'source_oversize';
         }
 
         // A NUL byte or an invalid encoding means this is not the source
         // text the tool reports; `//u` decides UTF-8 without mbstring.
         if (str_contains($contents, "\0") || preg_match('//u', $contents) !== 1) {
-            return self::refuse('source_not_text');
+            return 'source_not_text';
         }
 
         // Split after each newline, so every line keeps its own ending,
@@ -305,7 +424,33 @@ final readonly class PackageSourceReader
         $lines = preg_split('/(?<=\n)/', $contents, flags: PREG_SPLIT_NO_EMPTY);
         \assert(is_array($lines));
 
-        return [$resolved['version'], $lines];
+        return $lines;
+    }
+
+    /**
+     * Each line from $startLine on that contains $query, keyed by its
+     * one-based number and without its terminator.
+     *
+     * @param list<string> $lines
+     * @return \Generator<int, string>
+     */
+    private static function matches(array $lines, string $query, int $startLine): \Generator
+    {
+        $total = count($lines);
+
+        for ($line = $startLine; $line <= $total; $line++) {
+            $content = $lines[$line - 1];
+
+            // The terminator is the file's, not the line's, and a line
+            // carries at most one because the split point follows it.
+            if (str_ends_with($content, "\n")) {
+                $content = substr($content, 0, str_ends_with($content, "\r\n") ? -2 : -1);
+            }
+
+            if (str_contains($content, $query)) {
+                yield $line => $content;
+            }
+        }
     }
 
     /**
@@ -313,8 +458,8 @@ final readonly class PackageSourceReader
      * admitted path, or the refusal that stopped the call.
      *
      * Every rule that bounds what this package serves lives here, so a
-     * read and a listing are admitted and confined identically and
-     * differ only in what they do with the target. Admitting the path
+     * read, a search and a listing are admitted and confined identically
+     * and differ only in what they do with the target. Admitting the path
      * the caller wrote only bounds where the request pointed: a symlink
      * moves where it landed, so the resolved target is admitted again
      * and must still lie under the same install root — `src/Link.php`
@@ -322,12 +467,13 @@ final readonly class PackageSourceReader
      * the package is a read of something this tool does not serve,
      * however admitted its own name was.
      *
-     * @param bool $listing whether this call may name the package root
-     *        with {@see ROOT}: a listing has that directory to report,
-     *        and a read has no file behind it.
+     * @param bool $directory whether this call names a directory, and so
+     *        may name the package root with {@see ROOT}: a listing and a
+     *        tree search have that directory to work on, and a read has
+     *        no file behind it.
      * @return array{version: string, root: string, target: string}|Document
      */
-    private function resolve(string $package, string $path, bool $listing): array|Document
+    private function resolve(string $package, string $path, bool $directory): array|Document
     {
         $source = $this->packages->source($package);
 
@@ -335,7 +481,7 @@ final readonly class PackageSourceReader
             return self::refuse('package_unknown');
         }
 
-        $named = $listing && $path === self::ROOT;
+        $named = $directory && $path === self::ROOT;
 
         if (!$named && !self::admits($path)) {
             return self::refuse('path_not_admitted');
@@ -371,17 +517,21 @@ final readonly class PackageSourceReader
     }
 
     /**
-     * The reportable children of one resolved directory, unordered, or
-     * the refusal that stopped the scan.
+     * The reportable children of one resolved directory, each yielded as
+     * its name and its {@see classify()} type and resolved target in the
+     * order the directory is read; the generator returns the refusal that
+     * stopped the scan, or null once every child was considered.
      *
-     * A name that is not UTF-8 refuses the listing rather than being
-     * dropped or encoded: it cannot be reported as JSON, and a listing
+     * A generator, so a listing and a tree walk each stop at their own
+     * bound without the whole directory being collected first. A name
+     * that is not UTF-8 refuses the scan rather than being dropped or
+     * encoded: it cannot be reported as JSON, and a listing or a search
      * quietly missing one entry is not the directory it claims to be.
      *
      * @param string $root the resolved install root every child must stay under
-     * @return list<array{name: string, type: string}>|Document
+     * @return \Generator<string, array{string, string}, mixed, Document|null>
      */
-    private static function children(string $root, string $target): array|Document
+    private static function children(string $root, string $target): \Generator
     {
         // Suppressed for the reason the file open is: a directory that
         // cannot be opened is the returned code, not a warning on a
@@ -392,9 +542,8 @@ final readonly class PackageSourceReader
             return self::refuse('source_unreadable');
         }
 
-        /** @var list<array{name: string, type: string}> $entries */
-        $entries = [];
-
+        // The handle closes on every way out, a consumer that stops
+        // early included: destroying a suspended generator runs this.
         try {
             while (($name = readdir($handle)) !== false) {
                 if ($name === '.' || $name === '..') {
@@ -405,32 +554,127 @@ final readonly class PackageSourceReader
                     return self::refuse('source_unreadable');
                 }
 
-                $type = self::classify($root, $target . DIRECTORY_SEPARATOR . $name);
+                $classified = self::classify($root, $target . DIRECTORY_SEPARATOR . $name);
 
-                if ($type === null) {
-                    continue;
+                if ($classified !== null) {
+                    yield $name => $classified;
                 }
-
-                // Counted against what would be reported, and decided on
-                // the child past the cap, so the refusal is the whole
-                // answer and no partial name is built.
-                if (count($entries) === self::MAX_ENTRY_COUNT) {
-                    return self::refuse('directory_oversize');
-                }
-
-                $entries[] = ['name' => $name, 'type' => $type];
             }
         } finally {
             closedir($handle);
         }
 
-        return $entries;
+        return null;
     }
 
     /**
-     * `file` or `directory` for a child that is one and is admitted both
-     * by its own name and by the target it resolves to, or null for a
-     * child this tool does not serve.
+     * Every file under one resolved directory that a tree search reads,
+     * as the path it is reported by and the resolved target it is
+     * measured and opened by, in bytewise reported-path order — or the
+     * refusal that stopped the walk.
+     *
+     * Each level is admitted through {@see children()}, so the walk
+     * reaches exactly what successive listings would. The reported path
+     * is the named path followed by each child's own name, a link's
+     * included, so it is the path a window of that file takes. Every
+     * measurement, open and descent uses the target that child resolved
+     * to when it was re-admitted, so retargeting a link after its
+     * admission does not move what is read. A directory is walked once,
+     * by its resolved target and under the first name the walk reaches
+     * it by: a link back to an ancestor or to a directory already walked
+     * cannot loop or repeat it. Subdirectories are walked in bytewise order, so
+     * the same tree picks the same name on every platform.
+     *
+     * The two budgets are spent before any file is opened. Every
+     * reportable regular file counts toward {@see MAX_TREE_FILE_COUNT};
+     * a file past {@see MAX_SOURCE_BYTES} is the `source_oversize` a
+     * window reports, so it is left out unread, and every other file's
+     * size counts toward {@see MAX_TREE_BYTES}.
+     *
+     * @param string $target the resolved directory the call named
+     * @param string $prefix the reported path of $target, empty for the
+     *        root and otherwise ending in `/`
+     * @return list<array{string, string}>|Document
+     */
+    private static function tree(string $root, string $target, string $prefix): array|Document
+    {
+        /** @var list<array{string, string}> $files */
+        $files = [];
+        $count = 0;
+        $bytes = 0;
+        /** @var array<string, true> $walked */
+        $walked = [];
+        /** @var list<array{string, string}> $pending */
+        $pending = [[$prefix, $target]];
+
+        while (($next = array_pop($pending)) !== null) {
+            [$prefix, $directory] = $next;
+
+            if (isset($walked[$directory])) {
+                continue;
+            }
+
+            $walked[$directory] = true;
+
+            /** @var list<array{string, string}> $subdirectories */
+            $subdirectories = [];
+            $children = self::children($root, $directory);
+
+            foreach ($children as $name => [$type, $resolved]) {
+                if ($type === 'directory') {
+                    $subdirectories[] = [$prefix . $name . '/', $resolved];
+
+                    continue;
+                }
+
+                if (++$count > self::MAX_TREE_FILE_COUNT) {
+                    return self::refuse('package_search_oversize');
+                }
+
+                // The process outlives a package update, so the size is
+                // this file's now, not one PHP cached on an earlier call.
+                clearstatcache(true, $resolved);
+
+                // Suppressed for the reason the file open is.
+                $size = @filesize($resolved);
+
+                if ($size === false) {
+                    return self::refuse('source_unreadable');
+                }
+
+                if ($size > self::MAX_SOURCE_BYTES) {
+                    continue;
+                }
+
+                $bytes += $size;
+
+                if ($bytes > self::MAX_TREE_BYTES) {
+                    return self::refuse('package_search_oversize');
+                }
+
+                $files[] = [$prefix . $name, $resolved];
+            }
+
+            $refusal = $children->getReturn();
+
+            if ($refusal !== null) {
+                return $refusal;
+            }
+
+            // Pushed in descending order, so the stack pops them ascending.
+            usort($subdirectories, static fn (array $first, array $second): int => strcmp($second[0], $first[0]));
+            array_push($pending, ...$subdirectories);
+        }
+
+        usort($files, static fn (array $first, array $second): int => strcmp($first[0], $second[0]));
+
+        return $files;
+    }
+
+    /**
+     * `file` or `directory` and the resolved target for a child that is
+     * one and is admitted both by its own name and by that target, or
+     * null for a child this tool does not serve.
      *
      * The link is resolved rather than asked about: a link and a file
      * are the same thing to the tools that would read what is listed, so
@@ -438,8 +682,10 @@ final readonly class PackageSourceReader
      * it got there. The name is nonetheless decided on its own, because
      * a listing that named a hidden link to an ordinary file would offer
      * a name {@see read()} refuses.
+     *
+     * @return array{string, string}|null
      */
-    private static function classify(string $root, string $child): ?string
+    private static function classify(string $root, string $child): ?array
     {
         if (!self::admits(self::relative($root, $child))) {
             return null;
@@ -453,11 +699,13 @@ final readonly class PackageSourceReader
             return null;
         }
 
-        return match (true) {
+        $type = match (true) {
             is_dir($resolved) => 'directory',
             is_file($resolved) => 'file',
             default => null,
         };
+
+        return $type === null ? null : [$type, $resolved];
     }
 
     /** One path under the install root as the relative path a call names it by. */
@@ -469,7 +717,8 @@ final readonly class PackageSourceReader
     /**
      * Whether one relative path is one this tool serves, decided by its
      * syntax alone: the path a caller wrote, the path a symlink resolved
-     * to, and every child a listing considers all pass through here.
+     * to, and every child a listing or a tree search considers all pass
+     * through here.
      *
      * The install root is the boundary because an installed package puts
      * its production source where its own autoload map says — at the

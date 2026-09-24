@@ -89,6 +89,7 @@ final class OrbitronMcpBinaryTest extends TestCase
                 'orbitron_scaffold_apply',
                 OrbitronMcpApplication::SOURCE_TOOL,
                 OrbitronMcpApplication::SEARCH_TOOL,
+                OrbitronMcpApplication::TREE_SEARCH_TOOL,
                 OrbitronMcpApplication::LIST_TOOL,
                 DocsApplication::READ_TOOL,
                 DocsApplication::SEARCH_TOOL,
@@ -187,6 +188,42 @@ final class OrbitronMcpBinaryTest extends TestCase
         $read = $this->document($this->session([
             '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::SOURCE_TOOL
             . '","arguments":{"package":"kinetis/framework","path":"composer.json","startLine":'
+            . $match['line'] . ',"lineCount":1}}}',
+        ])[0]);
+
+        self::assertSame($match['content'], rtrim($read['content'], "\r\n"));
+    }
+
+    /**
+     * The search an agent runs before it knows the file, through the
+     * real binary: a class declaration found in a real installed
+     * package's `src`, reported at a path and line the window tool then
+     * reads back unchanged.
+     *
+     * @throws JsonException
+     */
+    public function test_a_real_tree_search_finds_the_file_the_window_tool_then_reads(): void
+    {
+        $frames = $this->session([
+            '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"'
+            . OrbitronMcpApplication::TREE_SEARCH_TOOL . '","arguments":{"package":"kinetis/framework",'
+            . '"query":"final class ProjectRoot","path":"src"}}}',
+        ]);
+
+        $search = $this->document($frames[0]);
+
+        self::assertFalse($frames[0]['result']['isError']);
+        self::assertSame($search, $frames[0]['result']['structuredContent']);
+        self::assertFalse($search['hasMore']);
+        self::assertIsArray($search['matches']);
+        self::assertCount(1, $search['matches']);
+
+        $match = $search['matches'][0];
+        self::assertSame('src/Runtime/ProjectRoot.php', $match['path']);
+
+        $read = $this->document($this->session([
+            '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"' . OrbitronMcpApplication::SOURCE_TOOL
+            . '","arguments":{"package":"kinetis/framework","path":"' . $match['path'] . '","startLine":'
             . $match['line'] . ',"lineCount":1}}}',
         ])[0]);
 

@@ -137,12 +137,12 @@ final class ContextTest extends TestCase
     }
 
     /**
-     * The three installed-source tools are named and their
+     * The four installed-source tools are named and their
      * argument-taking contract is stated in both the tool entries and
      * the server-level claim: the document must not say every tool is
-     * argument-free once three are not.
+     * argument-free once four are not.
      */
-    public function test_the_mcp_tools_include_the_installed_source_reader_search_and_listing(): void
+    public function test_the_mcp_tools_include_the_installed_source_reader_searches_and_listing(): void
     {
         $document = self::context()->toArray();
 
@@ -154,6 +154,7 @@ final class ContextTest extends TestCase
                 'orbitron_scaffold_apply',
                 'orbitron_read_package_source',
                 'orbitron_search_package_source',
+                'orbitron_search_package_source_tree',
                 'orbitron_list_package_source',
                 DocsApplication::READ_TOOL,
                 DocsApplication::SEARCH_TOOL,
@@ -182,6 +183,17 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('last reported line plus one', $searchTool);
         self::assertStringNotContainsString('nextStartLine', $searchTool);
 
+        $treeTool = $effects['orbitron_search_package_source_tree'];
+
+        self::assertStringContainsString('query', $treeTool);
+        self::assertStringContainsString('default `.`', $treeTool);
+        self::assertStringContainsString('bytewise path order and then line order', $treeTool);
+        // No cursor: both narrowing signals are stated as what to do.
+        self::assertStringContainsString('`hasMore: true` means narrow the `query` or the `path`', $treeTool);
+        self::assertStringContainsString('narrow the `path`, most commonly to `src`', $treeTool);
+        self::assertStringContainsString('package_search_oversize', $treeTool);
+        self::assertStringNotContainsString('startLine', $treeTool);
+
         $listTool = $effects['orbitron_list_package_source'];
 
         self::assertStringContainsString('entries', $listTool);
@@ -196,7 +208,9 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('Four tools take no argument', $document['server']);
         self::assertStringContainsString('orbitron_read_package_source', $document['server']);
         self::assertStringContainsString('orbitron_search_package_source', $document['server']);
+        self::assertStringContainsString('orbitron_search_package_source_tree', $document['server']);
         self::assertStringContainsString('orbitron_list_package_source', $document['server']);
+        self::assertStringContainsString('structuredContent', $document['server']);
         self::assertStringNotContainsString('every tool takes no arguments', $document['server']);
     }
 
@@ -403,6 +417,8 @@ final class ContextTest extends TestCase
         yield 'documentation entry resource' => ['kinetis://docs/agent-workflow'];
         yield 'installed source tool' => ['orbitron_read_package_source'];
         yield 'installed source search tool' => ['orbitron_search_package_source'];
+        yield 'installed source tree search tool' => ['orbitron_search_package_source_tree'];
+        yield 'package composer.json guidance' => ['PSR-4 roots and `extra.kinetis`'];
         yield 'serialized shared-state rule' => ['shared database, broker or object store one at a time'];
     }
 

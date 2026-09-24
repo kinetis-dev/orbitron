@@ -23,8 +23,9 @@ use stdClass;
 
 /**
  * Orbitron's four documents, one installed-source window, one
- * installed-source search, one installed-source directory listing, and
- * the documentation window and search as MCP tools, and its context
+ * installed-source file search, one installed-source tree search, one
+ * installed-source directory listing, and the documentation window and
+ * search as MCP tools, and its context
  * document plus the Kinetis documentation as MCP resources, over the
  * shared protocol server. One connection is the whole project-local
  * surface an agent needs: there is no second server to register.
@@ -49,13 +50,18 @@ use stdClass;
  * template, a command or the inventory path: four tools take no
  * argument at all, a resource read and the two documentation
  * tools each select one entry of a fixed catalogue whose URLs are the
- * documentation server's own constants, and the three that take a path
+ * documentation server's own constants, and the four that take a path
  * admit it only as a relative name under one installed package: each
  * schema is validated here in full before the package lookup, and the
- * path itself is admitted against a fixed set of locations, with the
- * resolved target re-admitted, before anything reaches the filesystem.
- * The three share that validation, and {@see PackageSourceReader} is the
- * one place a file or a directory behind any of them is opened.
+ * path itself is admitted by its syntax under that package's install
+ * root, with the resolved target re-admitted, before anything reaches
+ * the filesystem. The four share that validation, and
+ * {@see PackageSourceReader} is the one place a file or a directory
+ * behind any of them is opened.
+ *
+ * Every document a tool returns goes out twice in one result: as the
+ * JSON text every client reads, and as the same array in
+ * `structuredContent` for a client that reads structured output.
  *
  * `orbitron_scaffold_apply` is the one tool that writes. Selecting it is
  * the whole mutation request, which is why it has no boolean to set: the
@@ -79,6 +85,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
     public const string SEARCH_TOOL = 'orbitron_search_package_source';
 
     public const string LIST_TOOL = 'orbitron_list_package_source';
+
+    public const string TREE_SEARCH_TOOL = 'orbitron_search_package_source_tree';
 
     /**
      * The environment variable a containerized launcher sets to the
@@ -113,14 +121,17 @@ final readonly class OrbitronMcpApplication implements McpApplication
         . 'window of an installed package\'s own source, which is the authority whenever a page and the installed '
         . 'version could differ, and whenever an exact dependency\'s behavior is what the task turns on. Any '
         . 'package this project really installed is readable, not only kinetis/*: orbitron_inspect names the '
-        . 'kinetis/* ones, and the project\'s own composer.lock names every other. When the file is known but '
-        . 'the relevant line is not, call orbitron_search_package_source for a literal string in that file and '
-        . 'read a window around a line it reports: derive the file from the class and the package\'s own '
-        . 'composer.json autoload map, or search that package\'s README.md for the option or term to find the '
-        . 'file. When the package is known but the file is not, call orbitron_list_package_source for the '
-        . 'direct children of the package root, named as ".", or of any directory under it, and read or '
-        . 'search a file it names. Read vendor/ directly only when none of those yields a file, or a tool '
-        . 'refuses.';
+        . 'kinetis/* ones, and the project\'s own composer.lock names every other. Read a selected package\'s own '
+        . 'composer.json with orbitron_read_package_source for its description, requirements, PSR-4 roots and '
+        . 'extra.kinetis. When the file is known but the relevant line is not, call '
+        . 'orbitron_search_package_source for a literal string in that file and read a window around a line it '
+        . 'reports; derive the file from the class and that autoload map. When the package is known but the '
+        . 'file is not, call ' . self::TREE_SEARCH_TOOL . ' for a literal string across the package, or a '
+        . 'directory under it, and read a window around a match it reports. Its hasMore means narrow the query '
+        . 'or the path; its package_search_oversize refusal means narrow the path, most commonly to src. Call '
+        . 'orbitron_list_package_source for the direct children of the package root, named as ".", or of any '
+        . 'directory under it, when the layout itself is what you need. Read vendor/ directly only when none of '
+        . 'those yields a file, or a tool refuses.';
 
     /** The input schema the four document tools share: an object with no members and nothing else admitted. */
     private const string CLOSED_SCHEMA_DESCRIPTION = 'Takes no arguments.';
@@ -266,8 +277,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 . 'the option or term — then read a window around a line it reports with '
                 . self::SOURCE_TOOL . '. Takes the same package name and path, the exact string to look for, and '
                 . 'an optional first line. The search is case-sensitive and literal, with no pattern, and it '
-                . 'searches the one file it is given rather than a directory or a package. Reads nothing else '
-                . 'and writes nothing.',
+                . 'searches the one file it is given; ' . self::TREE_SEARCH_TOOL . ' searches a directory tree. '
+                . 'Reads nothing else and writes nothing.',
                 [
                     'type' => 'object',
                     'properties' => [
@@ -302,11 +313,58 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 self::readOnly(),
             ),
             new ToolDescription(
+                self::TREE_SEARCH_TOOL,
+                'Reports the lines that contain a literal string in every file under one directory of one '
+                . 'installed package, as a JSON document: each match\'s path relative to the package root, its '
+                . 'line number and the line itself, at the version this project has installed. Use it when the '
+                . 'package is known but the file is not, then read a window around a match with '
+                . self::SOURCE_TOOL . '. Takes the package name, the exact string to look for, and an optional '
+                . 'path naming any directory under that package\'s install root, "." — the root itself — by '
+                . 'default. The search is case-sensitive and literal, with no pattern, and matches come in '
+                . 'bytewise path order, then line order. Files are admitted as '
+                . self::LIST_TOOL . ' admits them; a binary file and one larger than '
+                . PackageSourceReader::MAX_SOURCE_BYTES . ' bytes are skipped. At most '
+                . PackageSourceReader::MAX_MATCH_COUNT . ' matches come back and there is no cursor: '
+                . '"hasMore" true means narrow the query or the path. A tree of more than '
+                . PackageSourceReader::MAX_TREE_FILE_COUNT . ' files, or more than '
+                . PackageSourceReader::MAX_TREE_BYTES . ' bytes of searchable files, is refused whole with '
+                . '"package_search_oversize": narrow the path, most commonly to "src". Reads nothing else and '
+                . 'writes nothing.',
+                [
+                    'type' => 'object',
+                    'properties' => [
+                        'package' => [
+                            'type' => 'string',
+                            'minLength' => 1,
+                            'description' => 'An installed package name: a kinetis/* one as orbitron_inspect '
+                                . 'reports it, or any other dependency as this project\'s composer.lock names it.',
+                        ],
+                        'query' => [
+                            'type' => 'string',
+                            'minLength' => 1,
+                            'maxLength' => PackageSourceReader::MAX_QUERY_LENGTH,
+                            'description' => 'The exact string a line must contain, matched case-sensitively.',
+                        ],
+                        'path' => [
+                            'type' => 'string',
+                            'minLength' => 1,
+                            'maxLength' => PackageSourceReader::MAX_PATH_LENGTH,
+                            'default' => PackageSourceReader::ROOT,
+                            'description' => 'The directory to search, relative to the package root, with / '
+                                . 'separators; "." is the package root itself.',
+                        ],
+                    ],
+                    'required' => ['package', 'query'],
+                    'additionalProperties' => false,
+                ],
+                self::readOnly(),
+            ),
+            new ToolDescription(
                 self::LIST_TOOL,
                 'Reports the direct children of one directory of one installed package as a JSON '
                 . 'document: each child\'s name and whether it is a file or a directory, at the version this '
-                . 'project has installed. Use it when the package is known but the file is not, then read or '
-                . 'search a file it names. Takes the package name and a path naming any directory under that '
+                . 'project has installed. Use it when the layout itself is what you need, then read or search a '
+                . 'file it names. Takes the package name and a path naming any directory under that '
                 . 'package\'s install root, or "." for the root itself. It lists that '
                 . 'one directory and nothing under it: no recursion, no pattern, no filter, no paging. A directory '
                 . 'of more than ' . PackageSourceReader::MAX_ENTRY_COUNT . ' reportable children is refused whole '
@@ -372,7 +430,7 @@ final readonly class OrbitronMcpApplication implements McpApplication
         ProgressEmitter $progress,
         ?object $context,
     ): ToolResult {
-        // The three tools that take arguments validate their whole
+        // The four tools that take arguments validate their whole
         // closed schema here, before a name or a path reaches a lookup
         // or the filesystem: a call a schema has no reading of is a
         // protocol error, not a refusal document.
@@ -388,6 +446,13 @@ final readonly class OrbitronMcpApplication implements McpApplication
             $reader = new PackageSourceReader($this->packages());
 
             return self::result($reader->search($package, $path, $query, $startLine));
+        }
+
+        if ($name === self::TREE_SEARCH_TOOL) {
+            [$package, $query, $path] = self::treeSearchArguments($arguments);
+            $reader = new PackageSourceReader($this->packages());
+
+            return self::result($reader->searchTree($package, $path, $query));
         }
 
         if ($name === self::LIST_TOOL) {
@@ -470,6 +535,27 @@ final readonly class OrbitronMcpApplication implements McpApplication
             self::text($values, 'path', PackageSourceReader::MAX_PATH_LENGTH),
             self::text($values, 'query', PackageSourceReader::MAX_QUERY_LENGTH),
             self::startLine($values),
+        ];
+    }
+
+    /**
+     * The tree search's arguments, from the same helpers: the package
+     * name, the query, and the directory, which defaults to the package
+     * root because that is where a caller that does not know the file
+     * starts.
+     *
+     * @return array{string, string, string}
+     */
+    private static function treeSearchArguments(stdClass $arguments): array
+    {
+        $values = self::members($arguments, ['package', 'query', 'path']);
+
+        return [
+            self::text($values, 'package'),
+            self::text($values, 'query', PackageSourceReader::MAX_QUERY_LENGTH),
+            \array_key_exists('path', $values)
+                ? self::text($values, 'path', PackageSourceReader::MAX_PATH_LENGTH)
+                : PackageSourceReader::ROOT,
         ];
     }
 
@@ -576,16 +662,15 @@ final readonly class OrbitronMcpApplication implements McpApplication
     }
 
     /**
-     * The document either way. A refusal or a failed write is a tool that
-     * ran and concluded, so it is an MCP error result carrying the same
-     * document a success carries — never a transport error that would
-     * leave the codes unreadable.
+     * The document either way, as its JSON text and as the body that text
+     * encodes. A refusal or a failed write is a tool that ran and
+     * concluded, so it is an MCP error result carrying the same document
+     * a success carries — never a transport error that would leave the
+     * codes unreadable.
      */
     private static function result(Document $document): ToolResult
     {
-        $json = $document->toJson();
-
-        return $document->failed ? ToolResult::error($json) : ToolResult::text($json);
+        return ToolResult::structured($document->toJson(), $document->body, $document->failed);
     }
 
     private static function tool(string $name, string $description, ToolAnnotations $annotations): ToolDescription

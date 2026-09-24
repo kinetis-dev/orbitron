@@ -34,7 +34,7 @@ agent. What it gives that agent is four documents — a portable Kinetis
 context document, this project's installed `kinetis/*` package inventory
 as JSON, a deterministic verification of the Composer layout, and one
 health-endpoint scaffold you preview before you apply it — plus, over
-MCP, the Kinetis documentation and three tools that reach an installed
+MCP, the Kinetis documentation and four tools that reach an installed
 package's own source. None of it is evidence that application code is
 correct; the project's own test suite and review are.
 
@@ -103,7 +103,7 @@ see [`orbitron:inspect`](https://kinetis.dev/docs/appendix-orbitron.html#orbitro
 |---|---|
 | `orbitron_inspect`, `orbitron_verify` | The two read-only documents above, as tool calls. |
 | `orbitron_scaffold_plan`, `orbitron_scaffold_apply` | The scaffold preview, and the one tool that writes. |
-| `orbitron_read_package_source`, `orbitron_search_package_source`, `orbitron_list_package_source` | A bounded window, a literal search, and a directory listing of one real installed, non-root package's own source — any package this project installed, not only `kinetis/*`. |
+| `orbitron_read_package_source`, `orbitron_search_package_source`, `orbitron_search_package_source_tree`, `orbitron_list_package_source` | A bounded window, a literal search of one file, a bounded literal search of a directory tree, and a directory listing of one real installed, non-root package's own source — any package this project installed, not only `kinetis/*`. |
 | `kinetis_read_doc`, `kinetis_search_doc`, `kinetis://docs/<page>` | The Kinetis documentation, as bounded windows, a literal search of one page, and whole pages — composed from [`kinetis/mcp-docs`](https://kinetis.dev/docs/mcp-docs.html), the one operation that reaches the network. |
 | `kinetis://orbitron/context` | The `orbitron:context` document. |
 
