@@ -207,7 +207,7 @@ final class OrbitronMcpBinaryTest extends TestCase
         $frames = $this->session([
             '{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"'
             . OrbitronMcpApplication::TREE_SEARCH_TOOL . '","arguments":{"package":"kinetis/framework",'
-            . '"query":"final class ProjectRoot","path":"src"}}}',
+            . '"query":"class ProjectRoot","path":"src"}}}',
         ]);
 
         $search = $this->document($frames[0]);
