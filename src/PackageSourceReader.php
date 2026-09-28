@@ -61,6 +61,9 @@ final readonly class PackageSourceReader
     /** The most matches one search returns. */
     public const int MAX_MATCH_COUNT = 50;
 
+    /** The most UTF-8 bytes one reported match excerpt carries. */
+    public const int MAX_MATCH_CONTENT_BYTES = 2048;
+
     /** The most entries one listing returns; the child past it refuses the call. */
     public const int MAX_ENTRY_COUNT = 200;
 
@@ -133,6 +136,9 @@ final readonly class PackageSourceReader
      * The scan is literal and case-sensitive, and each line is compared
      * as it is reported — without its terminator — so a query carrying
      * a line ending matches nothing rather than the end of a line.
+     * A reported line longer than {@see MAX_MATCH_CONTENT_BYTES} is a
+     * bounded UTF-8 excerpt containing its first match and carries
+     * `truncated: true`.
      *
      * Scanning stops at the first match past the cap. `hasMore` says
      * another one exists; the caller continues from the last reported
@@ -159,7 +165,7 @@ final readonly class PackageSourceReader
             return self::refuse('line_out_of_range');
         }
 
-        /** @var list<array{line: int, content: string}> $matches */
+        /** @var list<array{line: int, content: string, truncated?: true}> $matches */
         $matches = [];
         $hasMore = false;
 
@@ -172,7 +178,7 @@ final readonly class PackageSourceReader
                 break;
             }
 
-            $matches[] = ['line' => $line, 'content' => $content];
+            $matches[] = ['line' => $line, ...self::matchContent($content, $query)];
         }
 
         return new Document([
@@ -237,7 +243,7 @@ final readonly class PackageSourceReader
             return $files;
         }
 
-        /** @var list<array{path: string, line: int, content: string}> $matches */
+        /** @var list<array{path: string, line: int, content: string, truncated?: true}> $matches */
         $matches = [];
         $hasMore = false;
 
@@ -262,7 +268,7 @@ final readonly class PackageSourceReader
                     break 2;
                 }
 
-                $matches[] = ['path' => $logical, 'line' => $line, 'content' => $content];
+                $matches[] = ['path' => $logical, 'line' => $line, ...self::matchContent($content, $query)];
             }
         }
 
@@ -275,6 +281,50 @@ final readonly class PackageSourceReader
             'matches' => $matches,
             'hasMore' => $hasMore,
         ], failed: false);
+    }
+
+    /**
+     * The whole line when it fits, or one bounded UTF-8 excerpt carrying
+     * the first literal occurrence. The optional flag keeps ordinary
+     * matches at their existing shape while making omitted content
+     * explicit.
+     *
+     * @return array{content: string, truncated?: true}
+     */
+    private static function matchContent(string $content, string $query): array
+    {
+        if (strlen($content) <= self::MAX_MATCH_CONTENT_BYTES) {
+            return ['content' => $content];
+        }
+
+        $offset = strpos($content, $query);
+
+        if ($offset === false) {
+            throw new \LogicException('A reported source match does not contain its query.');
+        }
+
+        $queryBytes = strlen($query);
+        $contextBytes = self::MAX_MATCH_CONTENT_BYTES - $queryBytes;
+        $start = max(0, $offset - intdiv($contextBytes, 2));
+
+        // The source and query are valid UTF-8. Moving a proposed start
+        // past continuation bytes and an end before them keeps the
+        // excerpt valid without requiring mbstring.
+        while ((ord($content[$start]) & 0xc0) === 0x80) {
+            $start++;
+        }
+
+        $beforeBytes = $offset - $start;
+        $end = min(strlen($content), $offset + $queryBytes + $contextBytes - $beforeBytes);
+
+        while ($end < strlen($content) && (ord($content[$end]) & 0xc0) === 0x80) {
+            $end--;
+        }
+
+        return [
+            'content' => substr($content, $start, $end - $start),
+            'truncated' => true,
+        ];
     }
 
     /**

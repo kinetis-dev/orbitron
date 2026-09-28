@@ -271,12 +271,14 @@ final readonly class OrbitronMcpApplication implements McpApplication
             new ToolDescription(
                 self::SEARCH_TOOL,
                 'Reports every line of one file of one installed package that contains a literal '
-                . 'string, as a JSON document: the line numbers and the lines themselves, at the version this '
+                . 'string, as a JSON document: the line numbers and bounded matching excerpts, at the version this '
                 . 'project has installed. Use it when the file is known but the line is not — derive the file '
                 . 'from the class and that package\'s own composer.json autoload map, or search its README.md for '
                 . 'the option or term — then read a window around a line it reports with '
                 . self::SOURCE_TOOL . '. Takes the same package name and path, the exact string to look for, and '
                 . 'an optional first line. The search is case-sensitive and literal, with no pattern, and it '
+                . 'returns at most ' . PackageSourceReader::MAX_MATCH_CONTENT_BYTES . ' UTF-8 bytes of each line, '
+                . 'including the first match; an excerpt carries "truncated": true. It '
                 . 'searches the one file it is given; ' . self::TREE_SEARCH_TOOL . ' searches a directory tree. '
                 . 'Reads nothing else and writes nothing.',
                 [
@@ -316,7 +318,7 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 self::TREE_SEARCH_TOOL,
                 'Reports the lines that contain a literal string in every file under one directory of one '
                 . 'installed package, as a JSON document: each match\'s path relative to the package root, its '
-                . 'line number and the line itself, at the version this project has installed. Use it when the '
+                . 'line number and bounded matching excerpt, at the version this project has installed. Use it when the '
                 . 'package is known but the file is not, then read a window around a match with '
                 . self::SOURCE_TOOL . '. Takes the package name, the exact string to look for, and an optional '
                 . 'path naming any directory under that package\'s install root, "." — the root itself — by '
@@ -325,6 +327,8 @@ final readonly class OrbitronMcpApplication implements McpApplication
                 . self::LIST_TOOL . ' admits them; a binary file and one larger than '
                 . PackageSourceReader::MAX_SOURCE_BYTES . ' bytes are skipped. At most '
                 . PackageSourceReader::MAX_MATCH_COUNT . ' matches come back and there is no cursor: '
+                . 'each content is at most ' . PackageSourceReader::MAX_MATCH_CONTENT_BYTES . ' UTF-8 bytes, '
+                . 'includes the first match, and carries "truncated": true when it is an excerpt. '
                 . '"hasMore" true means narrow the query or the path. A tree of more than '
                 . PackageSourceReader::MAX_TREE_FILE_COUNT . ' files, or more than '
                 . PackageSourceReader::MAX_TREE_BYTES . ' bytes of searchable files, is refused whole with '

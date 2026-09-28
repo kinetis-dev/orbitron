@@ -623,6 +623,20 @@ final class PackageSourceReaderTest extends TestCase
         self::assertSame('☑ écrit', $document->body['query']);
     }
 
+    public function test_a_long_matching_line_is_a_bounded_utf8_excerpt_containing_the_query(): void
+    {
+        $line = str_repeat('é', 900) . '☑ needle' . str_repeat('界', 900);
+        $this->write('src/A.php', $line . "\n");
+
+        $match = $this->search('src/A.php', '☑ needle', 1)->body['matches'][0];
+
+        self::assertTrue($match['truncated']);
+        self::assertLessThanOrEqual(PackageSourceReader::MAX_MATCH_CONTENT_BYTES, strlen($match['content']));
+        self::assertStringContainsString('☑ needle', $match['content']);
+        self::assertSame(1, preg_match('//u', $match['content']));
+        self::assertNotSame($line, $match['content']);
+    }
+
     /** A last line with no terminator at all is scanned like any other. */
     public function test_a_match_on_a_last_line_without_a_final_newline_is_reported(): void
     {
@@ -1203,6 +1217,20 @@ final class PackageSourceReaderTest extends TestCase
             $document->body['matches'],
         );
         self::assertSame("class Controller\n", $this->read('src/Http/Controller.php', 1, 1)->body['content']);
+    }
+
+    public function test_a_tree_search_bounds_a_minified_matching_line(): void
+    {
+        $line = str_repeat('a', 4096) . 'needle' . str_repeat('b', 4096);
+        $this->write('dist/app.js', $line);
+
+        $match = $this->searchTree('.', 'needle')->body['matches'][0];
+
+        self::assertSame('dist/app.js', $match['path']);
+        self::assertTrue($match['truncated']);
+        self::assertLessThanOrEqual(PackageSourceReader::MAX_MATCH_CONTENT_BYTES, strlen($match['content']));
+        self::assertStringContainsString('needle', $match['content']);
+        self::assertNotSame($line, $match['content']);
     }
 
     public function test_a_tree_search_is_literal_and_case_sensitive_and_may_find_nothing(): void

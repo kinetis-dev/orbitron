@@ -200,6 +200,8 @@ final class OrbitronMcpApplicationTest extends TestCase
         self::assertSame('integer', $schema['properties']['startLine']['type']);
         self::assertSame(1, $schema['properties']['startLine']['minimum']);
         self::assertSame(1, $schema['properties']['startLine']['default']);
+        self::assertStringContainsString('2048 UTF-8 bytes', $tools[5]['description']);
+        self::assertStringContainsString('"truncated": true', $tools[5]['description']);
         self::assertSame(1, $schema['properties']['lineCount']['minimum']);
         self::assertSame(200, $schema['properties']['lineCount']['maximum']);
         self::assertSame(200, $schema['properties']['lineCount']['default']);
@@ -277,6 +279,8 @@ final class OrbitronMcpApplicationTest extends TestCase
         );
         self::assertStringContainsString('more than 512 files', $tool['description']);
         self::assertStringContainsString('more than 8388608 bytes', $tool['description']);
+        self::assertStringContainsString('2048 UTF-8 bytes', $tool['description']);
+        self::assertStringContainsString('"truncated": true', $tool['description']);
     }
 
     /**

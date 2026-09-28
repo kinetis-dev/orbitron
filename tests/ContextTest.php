@@ -178,6 +178,8 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('startLine', $searchTool);
         self::assertStringContainsString('matches', $searchTool);
         self::assertStringContainsString('hasMore', $searchTool);
+        self::assertStringContainsString('2048 UTF-8 bytes', $searchTool);
+        self::assertStringContainsString('`truncated: true`', $searchTool);
         // The cursor rule, which is the whole paging contract: there is
         // no member to carry it back.
         self::assertStringContainsString('last reported line plus one', $searchTool);
@@ -192,6 +194,8 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('`hasMore: true` means narrow the `query` or the `path`', $treeTool);
         self::assertStringContainsString('narrow the `path`, most commonly to `src`', $treeTool);
         self::assertStringContainsString('package_search_oversize', $treeTool);
+        self::assertStringContainsString('2048 UTF-8 bytes', $treeTool);
+        self::assertStringContainsString('`truncated: true`', $treeTool);
         self::assertStringNotContainsString('startLine', $treeTool);
 
         $listTool = $effects['orbitron_list_package_source'];
