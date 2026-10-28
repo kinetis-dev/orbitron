@@ -8,3 +8,11 @@ services:
         class: Kinetis\Linting\NoStaticPropertiesRule
         tags:
             - phpstan.rules.rule
+    -
+        class: Kinetis\Linting\NoBlockingIoRule
+        tags:
+            - phpstan.rules.rule
+    -
+        class: Kinetis\Linting\NoProcessGlobalsRule
+        tags:
+            - phpstan.rules.rule
