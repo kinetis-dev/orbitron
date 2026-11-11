@@ -9,6 +9,7 @@ use Kinetis\Orbitron\Console\VerifyCommand;
 use Kinetis\Orbitron\Documents;
 use Kinetis\Orbitron\InstalledPackages;
 use Kinetis\Orbitron\PackageFact;
+use Kinetis\Orbitron\Tests\Fixtures\CommandOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -21,16 +22,14 @@ final class VerifyCommandTest extends TestCase
         }
         JSON;
 
-    private StreamCapture $output;
-    private StreamCapture $errorOutput;
+    private CommandOutput $output;
 
     /** @var list<ProjectFixture> */
     private array $fixtures = [];
 
     protected function setUp(): void
     {
-        $this->output = new StreamCapture();
-        $this->errorOutput = new StreamCapture();
+        $this->output = new CommandOutput();
     }
 
     protected function tearDown(): void
@@ -65,10 +64,9 @@ final class VerifyCommandTest extends TestCase
     private function invoke(?string $projectRoot, array $argv = []): int
     {
         $command = new VerifyCommand(
+            $this->output->output,
             new Documents(self::packages()),
             $projectRoot,
-            $this->output->stream,
-            $this->errorOutput->stream,
         );
 
         return $command->run(CommandArguments::parse($argv));
@@ -108,9 +106,9 @@ final class VerifyCommandTest extends TestCase
             }
 
             JSON,
-            $this->output->contents(),
+            $this->output->takeStdout(),
         );
-        self::assertSame('', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStderr());
     }
 
     /**
@@ -148,9 +146,9 @@ final class VerifyCommandTest extends TestCase
             }
 
             JSON,
-            $this->output->contents(),
+            $this->output->takeStdout(),
         );
-        self::assertSame('', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStderr());
     }
 
     public function test_a_half_recognized_layout_exits_3_and_reports_no_namespaces(): void
@@ -159,7 +157,7 @@ final class VerifyCommandTest extends TestCase
 
         self::assertSame(3, $this->invoke($this->fixture($manifest)->root));
 
-        $document = $this->output->contents();
+        $document = $this->output->takeStdout();
 
         self::assertStringContainsString('"status": "error"', $document);
         self::assertStringContainsString('"code": "psr4_map_missing"', $document);
@@ -173,12 +171,12 @@ final class VerifyCommandTest extends TestCase
 
         self::assertSame(0, $this->invoke($root, ['--format=json']));
 
-        $explicit = $this->output->contents();
+        $explicit = $this->output->takeStdout();
 
         $this->setUp();
 
         self::assertSame(0, $this->invoke($root));
-        self::assertSame($explicit, $this->output->contents());
+        self::assertSame($explicit, $this->output->takeStdout());
     }
 
     /**
@@ -202,9 +200,11 @@ final class VerifyCommandTest extends TestCase
     public function test_a_rejected_invocation_exits_2_and_leaves_stdout_empty(array $argv): void
     {
         self::assertSame(2, $this->invoke($this->fixture(self::SKELETON)->root, $argv));
-        self::assertSame('', $this->output->contents());
-        self::assertStringContainsString('orbitron:verify', $this->errorOutput->contents());
-        self::assertStringContainsString('--format=json', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStdout());
+        self::assertSame(
+            "orbitron:verify takes no arguments and accepts --format=json only.\n",
+            $this->output->takeStderr(),
+        );
     }
 
     /**
@@ -229,6 +229,6 @@ final class VerifyCommandTest extends TestCase
             }
         }
 
-        self::assertStringContainsString('"production": "App\\\\"', $this->output->contents());
+        self::assertStringContainsString('"production": "App\\\\"', $this->output->takeStdout());
     }
 }

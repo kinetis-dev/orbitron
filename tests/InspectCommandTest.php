@@ -10,22 +10,21 @@ use Kinetis\Orbitron\Console\InspectCommand;
 use Kinetis\Orbitron\Documents;
 use Kinetis\Orbitron\InstalledPackages;
 use Kinetis\Orbitron\PackageFact;
+use Kinetis\Orbitron\Tests\Fixtures\CommandOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
 final class InspectCommandTest extends TestCase
 {
-    private StreamCapture $output;
-    private StreamCapture $errorOutput;
+    private CommandOutput $output;
 
     /** @var list<string> fixture roots and links, removed in reverse order */
     private array $paths = [];
 
     protected function setUp(): void
     {
-        $this->output = new StreamCapture();
-        $this->errorOutput = new StreamCapture();
+        $this->output = new CommandOutput();
     }
 
     protected function tearDown(): void
@@ -42,6 +41,7 @@ final class InspectCommandTest extends TestCase
     private function invoke(array $argv = [], ?array $facts = null, ?string $root = null): int
     {
         $command = new InspectCommand(
+            $this->output->output,
             new Documents(new InstalledPackages($facts ?? [
                 new PackageFact('kinetis/queue', '1.3.2', '/app/vendor/kinetis/queue'),
                 new PackageFact('kinetis/orbitron', '1.0.0', '/app/vendor/kinetis/orbitron'),
@@ -50,8 +50,6 @@ final class InspectCommandTest extends TestCase
                 new PackageFact('psr/log', '3.0.2', '/app/vendor/psr/log'),
             ])),
             $root ?? $this->directory(),
-            $this->output->stream,
-            $this->errorOutput->stream,
         );
 
         return $command->run(CommandArguments::parse($argv));
@@ -73,7 +71,7 @@ final class InspectCommandTest extends TestCase
     private function document(): array
     {
         /** @var array<string, mixed> */
-        return json_decode($this->output->contents(), true, flags: JSON_THROW_ON_ERROR);
+        return json_decode($this->output->takeStdout(), true, flags: JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -112,9 +110,9 @@ final class InspectCommandTest extends TestCase
             }
 
             JSON,
-            $this->output->contents(),
+            $this->output->takeStdout(),
         );
-        self::assertSame('', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStderr());
     }
 
     /**
@@ -134,9 +132,11 @@ final class InspectCommandTest extends TestCase
 
         self::assertSame(0, $this->invoke(root: $link . '/.'));
 
-        self::assertSame(realpath($target), $this->document()['projectRoot']);
-        self::assertSame(realpath($target), $this->document()['checkoutRoot']);
-        self::assertNotSame($link, $this->document()['projectRoot']);
+        $document = $this->document();
+
+        self::assertSame(realpath($target), $document['projectRoot']);
+        self::assertSame(realpath($target), $document['checkoutRoot']);
+        self::assertNotSame($link, $document['projectRoot']);
     }
 
     /**
@@ -181,7 +181,7 @@ final class InspectCommandTest extends TestCase
             );
         }
 
-        self::assertSame('', $this->output->contents());
+        self::assertSame('', $this->output->takeStdout());
     }
 
     public function test_an_explicit_json_format_is_the_same_invocation_as_none(): void
@@ -190,12 +190,12 @@ final class InspectCommandTest extends TestCase
 
         self::assertSame(0, $this->invoke(['--format=json'], root: $root));
 
-        $explicit = $this->output->contents();
+        $explicit = $this->output->takeStdout();
 
         $this->setUp();
 
         self::assertSame(0, $this->invoke(root: $root));
-        self::assertSame($explicit, $this->output->contents());
+        self::assertSame($explicit, $this->output->takeStdout());
     }
 
     /**
@@ -218,9 +218,11 @@ final class InspectCommandTest extends TestCase
     public function test_a_rejected_invocation_exits_2_and_leaves_stdout_empty(array $argv): void
     {
         self::assertSame(2, $this->invoke($argv));
-        self::assertSame('', $this->output->contents());
-        self::assertStringContainsString('orbitron:inspect', $this->errorOutput->contents());
-        self::assertStringContainsString('--format=json', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStdout());
+        self::assertSame(
+            "orbitron:inspect takes no arguments and accepts --format=json only.\n",
+            $this->output->takeStderr(),
+        );
     }
 
     /**
@@ -231,13 +233,13 @@ final class InspectCommandTest extends TestCase
     {
         self::assertSame(0, $this->invoke(facts: [new PackageFact('kinetis/orbitron', '1.0.0', '/app')]));
 
-        $first = $this->output->contents();
+        $first = $this->output->takeStdout();
 
         $this->setUp();
 
         self::assertSame(0, $this->invoke(facts: [new PackageFact('kinetis/orbitron', '1.0.1', '/app')]));
 
         self::assertStringContainsString('"orbitronVersion": "1.0.0"', $first);
-        self::assertStringContainsString('"orbitronVersion": "1.0.1"', $this->output->contents());
+        self::assertStringContainsString('"orbitronVersion": "1.0.1"', $this->output->takeStdout());
     }
 }

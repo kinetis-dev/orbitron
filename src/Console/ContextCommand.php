@@ -7,6 +7,7 @@ namespace Kinetis\Orbitron\Console;
 use JsonException;
 use Kinetis\Console\Attributes\Command;
 use Kinetis\Console\CommandArguments;
+use Kinetis\Console\Output;
 use Kinetis\Orbitron\Documents;
 use Kinetis\Orbitron\JsonDocument;
 
@@ -26,14 +27,9 @@ final readonly class ContextCommand
     /** @var non-empty-list<string> markdown first, because it is the default */
     private const array FORMATS = ['markdown', 'json'];
 
-    /**
-     * @param resource $output
-     * @param resource $errorOutput
-     */
     public function __construct(
+        private Output $output,
         private Documents $documents = new Documents(),
-        private mixed $output = STDOUT,
-        private mixed $errorOutput = STDERR,
     ) {}
 
     /**
@@ -49,15 +45,14 @@ final readonly class ContextCommand
         $format = Invocation::format($arguments, self::FORMATS);
 
         if ($format === null) {
-            fwrite(
-                $this->errorOutput,
-                "orbitron:context takes no arguments and accepts --format=markdown (the default) or --format=json.\n",
+            $this->output->error(
+                "orbitron:context takes no arguments and accepts --format=markdown (the default) or --format=json.",
             );
 
             return 2;
         }
 
-        fwrite($this->output, $format === 'json'
+        $this->output->write($format === 'json'
             ? JsonDocument::render($this->documents->contextBody())
             : $this->documents->context());
 

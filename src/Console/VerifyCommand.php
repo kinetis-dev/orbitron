@@ -7,6 +7,7 @@ namespace Kinetis\Orbitron\Console;
 use JsonException;
 use Kinetis\Console\Attributes\Command;
 use Kinetis\Console\CommandArguments;
+use Kinetis\Console\Output;
 use Kinetis\Orbitron\Documents;
 use Kinetis\Runtime\ProjectRoot;
 
@@ -37,15 +38,11 @@ final readonly class VerifyCommand
      * layout instead of whatever root this process happens to run under.
      * It is a test seam, never a client-selected path: no argument of
      * this command reaches it.
-     *
-     * @param resource $output
-     * @param resource $errorOutput
      */
     public function __construct(
+        private Output $output,
         private Documents $documents = new Documents(),
         private ?string $projectRootOverride = null,
-        private mixed $output = STDOUT,
-        private mixed $errorOutput = STDERR,
     ) {}
 
     /**
@@ -59,9 +56,8 @@ final readonly class VerifyCommand
     public function run(CommandArguments $arguments): int
     {
         if (Invocation::format($arguments, self::FORMATS) === null) {
-            fwrite(
-                $this->errorOutput,
-                "orbitron:verify takes no arguments and accepts --format=json only.\n",
+            $this->output->error(
+                "orbitron:verify takes no arguments and accepts --format=json only.",
             );
 
             return 2;
@@ -76,7 +72,7 @@ final readonly class VerifyCommand
             $this->projectRootOverride ?? ProjectRoot::detect(dirname(__DIR__)),
         );
 
-        fwrite($this->output, $document->toJson());
+        $this->output->write($document->toJson());
 
         // A completed verification that found errors is a distinct
         // outcome from a launcher failure (1) and from a rejected

@@ -19,6 +19,7 @@ use Kinetis\Orbitron\HealthScaffold;
 use Kinetis\Orbitron\InstalledPackages;
 use Kinetis\Orbitron\Mcp\OrbitronMcpApplication;
 use Kinetis\Orbitron\PackageSourceReader;
+use Kinetis\Orbitron\Tests\Fixtures\CommandOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use stdClass;
@@ -694,9 +695,8 @@ final class OrbitronMcpApplicationTest extends TestCase
                 ['{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"orbitron_inspect"}}'],
             ))[0];
 
-            $output = new StreamCapture();
-            $errorOutput = new StreamCapture();
-            $command = new InspectCommand($this->documents(), $link, $output->stream, $errorOutput->stream);
+            $output = new CommandOutput();
+            $command = new InspectCommand($output->output, $this->documents(), $link);
 
             self::assertSame(0, $command->run(CommandArguments::parse([])));
         } finally {
@@ -704,7 +704,7 @@ final class OrbitronMcpApplicationTest extends TestCase
         }
 
         self::assertFalse($frame['result']['isError']);
-        self::assertSame($output->contents(), $frame['result']['content'][0]['text']);
+        self::assertSame($output->takeStdout(), $frame['result']['content'][0]['text']);
         self::assertSame(Documents::INSPECT_SCHEMA_VERSION, self::document($frame)['schemaVersion']);
         self::assertSame(realpath($this->project->root), self::document($frame)['projectRoot']);
         self::assertSame(realpath($this->project->root), self::document($frame)['checkoutRoot']);

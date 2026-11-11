@@ -7,6 +7,7 @@ namespace Kinetis\Orbitron\Console;
 use JsonException;
 use Kinetis\Console\Attributes\Command;
 use Kinetis\Console\CommandArguments;
+use Kinetis\Console\Output;
 use Kinetis\Orbitron\Documents;
 use Kinetis\Runtime\ProjectRoot;
 
@@ -35,15 +36,11 @@ final readonly class InspectCommand
      * $projectRootOverride is a test seam for the same reason as
      * {@see VerifyCommand}'s, never a client-selected path: no argument of
      * this command reaches it.
-     *
-     * @param resource $output
-     * @param resource $errorOutput
      */
     public function __construct(
+        private Output $output,
         private Documents $documents = new Documents(),
         private ?string $projectRootOverride = null,
-        private mixed $output = STDOUT,
-        private mixed $errorOutput = STDERR,
     ) {}
 
     /**
@@ -57,9 +54,8 @@ final readonly class InspectCommand
     public function run(CommandArguments $arguments): int
     {
         if (Invocation::format($arguments, self::FORMATS) === null) {
-            fwrite(
-                $this->errorOutput,
-                "orbitron:inspect takes no arguments and accepts --format=json only.\n",
+            $this->output->error(
+                "orbitron:inspect takes no arguments and accepts --format=json only.",
             );
 
             return 2;
@@ -70,7 +66,7 @@ final readonly class InspectCommand
             $this->projectRootOverride ?? ProjectRoot::detect(dirname(__DIR__)),
         );
 
-        fwrite($this->output, $document->toJson());
+        $this->output->write($document->toJson());
 
         return 0;
     }

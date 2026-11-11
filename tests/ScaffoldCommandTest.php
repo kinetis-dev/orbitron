@@ -10,6 +10,7 @@ use Kinetis\Orbitron\Documents;
 use Kinetis\Orbitron\HealthScaffold;
 use Kinetis\Orbitron\InstalledPackages;
 use Kinetis\Orbitron\PackageFact;
+use Kinetis\Orbitron\Tests\Fixtures\CommandOutput;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -18,16 +19,14 @@ use PHPUnit\Framework\TestCase;
  */
 final class ScaffoldCommandTest extends TestCase
 {
-    private StreamCapture $output;
-    private StreamCapture $errorOutput;
+    private CommandOutput $output;
 
     /** @var list<ScaffoldProject> */
     private array $projects = [];
 
     protected function setUp(): void
     {
-        $this->output = new StreamCapture();
-        $this->errorOutput = new StreamCapture();
+        $this->output = new CommandOutput();
     }
 
     protected function tearDown(): void
@@ -62,10 +61,9 @@ final class ScaffoldCommandTest extends TestCase
     private function invoke(?string $projectRoot, array $argv = [], ?HealthScaffold $scaffold = null): int
     {
         $command = new ScaffoldCommand(
+            $this->output->output,
             new Documents(self::packages(), $scaffold ?? new HealthScaffold()),
             $projectRoot,
-            $this->output->stream,
-            $this->errorOutput->stream,
         );
 
         return $command->run(CommandArguments::parse($argv));
@@ -95,9 +93,9 @@ final class ScaffoldCommandTest extends TestCase
             }
 
             JSON,
-            $this->output->contents(),
+            $this->output->takeStdout(),
         );
-        self::assertSame('', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStderr());
         self::assertSame($before, $project->tree());
     }
 
@@ -124,9 +122,9 @@ final class ScaffoldCommandTest extends TestCase
             }
 
             JSON,
-            $this->output->contents(),
+            $this->output->takeStdout(),
         );
-        self::assertSame('', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStderr());
         self::assertFileExists($project->path('src/Http/HealthController.php'));
         self::assertFileExists($project->path('tests/Http/HealthControllerTest.php'));
     }
@@ -158,9 +156,9 @@ final class ScaffoldCommandTest extends TestCase
             }
 
             JSON,
-            $this->output->contents(),
+            $this->output->takeStdout(),
         );
-        self::assertSame('', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStderr());
     }
 
     public function test_a_failed_write_whose_rollback_failed_names_what_may_remain_and_exits_3(): void
@@ -192,7 +190,7 @@ final class ScaffoldCommandTest extends TestCase
             }
 
             JSON,
-            $this->output->contents(),
+            $this->output->takeStdout(),
         );
     }
 
@@ -202,12 +200,12 @@ final class ScaffoldCommandTest extends TestCase
 
         self::assertSame(0, $this->invoke($root, ['--format=json']));
 
-        $explicit = $this->output->contents();
+        $explicit = $this->output->takeStdout();
 
         $this->setUp();
 
         self::assertSame(0, $this->invoke($root));
-        self::assertSame($explicit, $this->output->contents());
+        self::assertSame($explicit, $this->output->takeStdout());
     }
 
     /**
@@ -237,9 +235,11 @@ final class ScaffoldCommandTest extends TestCase
         $before = $project->tree();
 
         self::assertSame(2, $this->invoke($project->root, $argv));
-        self::assertSame('', $this->output->contents());
-        self::assertStringContainsString('orbitron:scaffold', $this->errorOutput->contents());
-        self::assertStringContainsString('--apply', $this->errorOutput->contents());
+        self::assertSame('', $this->output->takeStdout());
+        self::assertSame(
+            "orbitron:scaffold takes no arguments, accepts --format=json only, and takes --apply as a bare flag.\n",
+            $this->output->takeStderr(),
+        );
         self::assertSame($before, $project->tree());
     }
 
@@ -263,7 +263,7 @@ final class ScaffoldCommandTest extends TestCase
             }
         }
 
-        self::assertStringContainsString('"status": "created"', $this->output->contents());
+        self::assertStringContainsString('"status": "created"', $this->output->takeStdout());
         self::assertFileExists($project->path('src/Http/HealthController.php'));
     }
 }

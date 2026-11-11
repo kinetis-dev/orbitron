@@ -7,6 +7,7 @@ namespace Kinetis\Orbitron\Console;
 use JsonException;
 use Kinetis\Console\Attributes\Command;
 use Kinetis\Console\CommandArguments;
+use Kinetis\Console\Output;
 use Kinetis\Orbitron\Documents;
 use Kinetis\Orbitron\ScaffoldMode;
 use Kinetis\Runtime\ProjectRoot;
@@ -40,15 +41,11 @@ final readonly class ScaffoldCommand
      * $projectRootOverride is a test seam, exactly as it is on
      * `orbitron:verify`: no argument of this command reaches it, and a
      * scaffold is never written to a path a caller named.
-     *
-     * @param resource $output
-     * @param resource $errorOutput
      */
     public function __construct(
+        private Output $output,
         private Documents $documents = new Documents(),
         private ?string $projectRootOverride = null,
-        private mixed $output = STDOUT,
-        private mixed $errorOutput = STDERR,
     ) {}
 
     /**
@@ -64,10 +61,9 @@ final readonly class ScaffoldCommand
         $apply = Invocation::apply($arguments);
 
         if (Invocation::format($arguments, self::FORMATS) === null || $apply === null) {
-            fwrite(
-                $this->errorOutput,
+            $this->output->error(
                 "orbitron:scaffold takes no arguments, accepts --format=json only, "
-                . "and takes --apply as a bare flag.\n",
+                . "and takes --apply as a bare flag.",
             );
 
             return 2;
@@ -80,7 +76,7 @@ final readonly class ScaffoldCommand
             $apply ? ScaffoldMode::Apply : ScaffoldMode::Preview,
         );
 
-        fwrite($this->output, $document->toJson());
+        $this->output->write($document->toJson());
 
         // A completed operation that refused or failed is its own
         // outcome, distinct from a launcher failure (1) and a rejected

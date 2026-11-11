@@ -316,6 +316,7 @@ final class PackageBoundaryTest extends TestCase
                 'JsonException',
                 'Kinetis\Console\Attributes\Command',
                 'Kinetis\Console\CommandArguments',
+                'Kinetis\Console\Output',
                 'Kinetis\McpDocs\DocsApplication',
                 'Kinetis\McpProtocol\Exception\JsonRpcException',
                 'Kinetis\McpProtocol\McpApplication',
