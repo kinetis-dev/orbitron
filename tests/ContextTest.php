@@ -126,6 +126,15 @@ final class ContextTest extends TestCase
         self::assertStringContainsString('permanent-failure recovery', $workflow);
     }
 
+    public function test_the_workflow_routes_cross_process_coordination_to_the_recipes(): void
+    {
+        $workflow = implode("\n", self::context()->toArray()['workflow']);
+
+        self::assertStringContainsString('"Coordinating work across processes"', $workflow);
+        self::assertStringContainsString('`kinetis://docs/application-recipes`', $workflow);
+        self::assertStringContainsString('Never hold a lock, transaction or pinned connection while waiting', $workflow);
+    }
+
     public function test_the_workflow_keeps_authenticated_mcp_tools_closed_over_stdio(): void
     {
         $workflow = implode("\n", self::context()->toArray()['workflow']);
