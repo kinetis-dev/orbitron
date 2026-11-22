@@ -95,7 +95,7 @@ final class PackageBoundaryTest extends TestCase
         self::assertSame(['bin/kinetis-orbitron-mcp'], $composer['bin']);
         self::assertSame(
             [
-                'php' => '^8.4',
+                'php' => '>=8.4 <8.6',
                 'kinetis/framework' => 'dev-main',
                 'kinetis/mcp-docs' => 'dev-main',
                 'kinetis/mcp-protocol' => 'dev-main',

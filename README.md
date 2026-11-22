@@ -45,7 +45,7 @@ does.
 ## Start a new project
 
 ```console
-docker run --rm -v "$PWD":/app -w /app composer:2 \
+docker run --rm -v "$PWD":/app -w /app composer:2.11 \
     create-project --no-install kinetis/skeleton my-app
 cd my-app
 cp .env.example .env
